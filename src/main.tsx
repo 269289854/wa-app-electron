@@ -837,6 +837,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
     },
     onError: (error) => notify('error', errorMessage(error)),
   });
+  const addAccountBusy = probeMutation.isPending || registerMutation.isPending || otpMutation.isPending;
   return (
     <section className="add-page">
       <div className="section-title">
@@ -848,15 +849,15 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
           <div className="form-grid">
             <label>
               国家拨号码
-              <input value={countryCallingCode} onChange={(event) => setCountryCallingCode(event.target.value)} placeholder="+1" />
+              <input value={countryCallingCode} onChange={(event) => setCountryCallingCode(event.target.value)} placeholder="+1" disabled={addAccountBusy} />
             </label>
             <label>
               手机号
-              <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="4155550123" />
+              <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="4155550123" disabled={addAccountBusy} />
             </label>
             <label>
               注册通道
-              <select value={method} onChange={(event) => setMethod(event.target.value)}>
+              <select value={method} onChange={(event) => setMethod(event.target.value)} disabled={addAccountBusy}>
                 {registrationMethods.map((item) => <option value={item.code} key={item.code}>{item.label}</option>)}
               </select>
             </label>
@@ -875,12 +876,12 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
               </div>
             ) : null}
             <div className="inline-actions">
-              <button className="secondary-button" disabled={probeMutation.isPending} onClick={() => probeMutation.mutate()}>
-                <Search size={15} />
+              <button className="secondary-button" disabled={addAccountBusy} onClick={() => probeMutation.mutate()}>
+                {probeMutation.isPending ? <Loader2 className="spin" size={15} /> : <Search size={15} />}
                 探测号码
               </button>
-              <button className="primary-button" disabled={registerMutation.isPending || Boolean(probe && !status.canRegister)} onClick={() => registerMutation.mutate()}>
-                <Send size={15} />
+              <button className="primary-button" disabled={addAccountBusy || Boolean(probe && !status.canRegister)} onClick={() => registerMutation.mutate()}>
+                {registerMutation.isPending ? <Loader2 className="spin" size={15} /> : <Send size={15} />}
                 发起注册
               </button>
             </div>
@@ -890,14 +891,14 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
           <div className="form-grid">
             <label>
               待注册账号 ID
-              <input value={pendingAccountID} onChange={(event) => setPendingAccountID(event.target.value)} placeholder="wa_account_id" />
+              <input value={pendingAccountID} onChange={(event) => setPendingAccountID(event.target.value)} placeholder="wa_account_id" disabled={addAccountBusy} />
             </label>
             <label>
               OTP
-              <input value={otp} onChange={(event) => setOtp(event.target.value)} type="password" />
+              <input value={otp} onChange={(event) => setOtp(event.target.value)} type="password" disabled={addAccountBusy} />
             </label>
-            <button className="primary-button" disabled={!pendingAccountID || !otp || otpMutation.isPending} onClick={() => otpMutation.mutate()}>
-              <KeyRound size={15} />
+            <button className="primary-button" disabled={!pendingAccountID || !otp || addAccountBusy} onClick={() => otpMutation.mutate()}>
+              {otpMutation.isPending ? <Loader2 className="spin" size={15} /> : <KeyRound size={15} />}
               提交 OTP
             </button>
           </div>
