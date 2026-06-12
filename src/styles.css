@@ -305,6 +305,11 @@ button { cursor: pointer; }
   color: #334155;
   font-size: 12px;
 }
+.debug-json {
+  max-height: 520px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .avatar-cropper {
   display: grid;
   gap: 10px;

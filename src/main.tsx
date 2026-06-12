@@ -770,13 +770,25 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
   const [countryCallingCode, setCountryCallingCode] = useState('');
   const [phone, setPhone] = useState('');
   const [probe, setProbe] = useState<WorkflowResponse | null>(null);
+  const [debugExchange, setDebugExchange] = useState<DebugExchange | null>(null);
   const [method, setMethod] = useState('sms');
   const [pendingAccountID, setPendingAccountID] = useState('');
   const [otp, setOtp] = useState('');
   const input = resolvePhoneInput(phone, countryCallingCode);
   const status = probeStatus(probe);
   const probeMutation = useMutation({
-    mutationFn: () => probePhoneSMS(requirePhone(input)),
+    mutationFn: async () => {
+      const body = requirePhone(input);
+      const exchange = debugRequest('探测号码', '/api/wa/phone/sms-probe', body);
+      try {
+        const response = await probePhoneSMS(body);
+        setDebugExchange({ ...exchange, response: sanitizeDebugValue(response) });
+        return response;
+      } catch (error) {
+        setDebugExchange({ ...exchange, error: debugError(error) });
+        throw error;
+      }
+    },
     onSuccess: (result) => {
       setProbe(result);
       notify('success', '号码探测完成');
@@ -784,7 +796,19 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
     onError: (error) => notify('error', errorMessage(error)),
   });
   const registerMutation = useMutation({
-    mutationFn: () => registerPhone(requirePhone(input), method),
+    mutationFn: async () => {
+      const phoneInput = requirePhone(input);
+      const body = { ...phoneInput, delivery_method: method };
+      const exchange = debugRequest('发起注册', '/api/wa/register', body);
+      try {
+        const response = await registerPhone(phoneInput, method);
+        setDebugExchange({ ...exchange, response: sanitizeDebugValue(response) });
+        return response;
+      } catch (error) {
+        setDebugExchange({ ...exchange, error: debugError(error) });
+        throw error;
+      }
+    },
     onSuccess: (result) => {
       setProbe(result);
       if (result.wa_account_id) setPendingAccountID(result.wa_account_id);
@@ -794,7 +818,18 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
     onError: (error) => notify('error', errorMessage(error)),
   });
   const otpMutation = useMutation({
-    mutationFn: () => submitRegistrationOTP(pendingAccountID, otp),
+    mutationFn: async () => {
+      const body = { wa_account_id: pendingAccountID, otp };
+      const exchange = debugRequest('提交 OTP', '/api/wa/actions/registration/resume-otp', body);
+      try {
+        const response = await submitRegistrationOTP(pendingAccountID, otp);
+        setDebugExchange({ ...exchange, response: sanitizeDebugValue(response) });
+        return response;
+      } catch (error) {
+        setDebugExchange({ ...exchange, error: debugError(error) });
+        throw error;
+      }
+    },
     onSuccess: (result) => {
       notify(result.success === false || result.error_message ? 'error' : 'success', result.error_message || 'OTP 已提交');
       setOtp('');
@@ -869,10 +904,59 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
         </InfoCard>
       </div>
       <InfoCard title="结果" icon={<MonitorCog size={17} />}>
-        <pre className="json-box">{JSON.stringify(probe || {}, null, 2)}</pre>
+        <pre className="json-box debug-json">{JSON.stringify(debugExchange || { hint: '点击“探测号码”或“发起注册”后，这里会显示请求和应答。' }, null, 2)}</pre>
       </InfoCard>
     </section>
   );
+}
+
+type DebugExchange = {
+  label: string;
+  at: string;
+  request: {
+    path: string;
+    method: string;
+    body: unknown;
+  };
+  response?: unknown;
+  error?: {
+    name: string;
+    message: string;
+  };
+};
+
+function debugRequest(label: string, path: string, body: unknown): DebugExchange {
+  return {
+    label,
+    at: new Date().toISOString(),
+    request: {
+      path,
+      method: 'POST',
+      body: sanitizeDebugValue(body),
+    },
+  };
+}
+
+function debugError(error: unknown) {
+  return {
+    name: error instanceof Error ? error.name : typeof error,
+    message: error instanceof Error ? error.message : String(error),
+  };
+}
+
+function sanitizeDebugValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizeDebugValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, nested]) => [
+      key,
+      isSensitiveDebugKey(key) ? '***' : sanitizeDebugValue(nested),
+    ]),
+  );
+}
+
+function isSensitiveDebugKey(key: string) {
+  return /(otp|code|token|auth|key|cookie|secret|password|session|enc|proxy_url)/i.test(key);
 }
 
 function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: string) => void; compact?: boolean }) {
