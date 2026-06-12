@@ -1,7 +1,6 @@
 import type {
   AccountMessage,
   AccountSettingsResponse,
-  ClientProfile,
   ListAccountsResponse,
   ListContactsResponse,
   ListMessagesResponse,

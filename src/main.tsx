@@ -30,7 +30,6 @@ import {
   accountID,
   accountTitle,
   assetDataUrl,
-  checkLoginState,
   contactAvatarPath,
   deleteAccount,
   deleteContact,
@@ -59,7 +58,7 @@ import {
   type PhoneInput,
 } from './api';
 import { probeStatus, registrationMethods, statusReason } from './result-model';
-import type { AccountMessage, ClientProfile, WAAccount, WAContact, WorkflowResponse } from './types';
+import type { AccountMessage, ClientProfile, WAAccount, WorkflowResponse } from './types';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -282,7 +281,7 @@ function ChatPanel({ account, selectedContactID, onSelectContact, notify }: { ac
   );
 }
 
-function ContactList({ accountID, contacts, loading, activeID, onSelect, onDelete }: { accountID: string; contacts: ReturnType<typeof normalizeContacts>; loading: boolean; activeID: string; onSelect: (id: string) => void; onDelete: (id: string) => void }) {
+function ContactList({ contacts, loading, activeID, onSelect, onDelete }: { accountID: string; contacts: ReturnType<typeof normalizeContacts>; loading: boolean; activeID: string; onSelect: (id: string) => void; onDelete: (id: string) => void }) {
   const [query, setQuery] = useState('');
   const visible = contacts.filter((contact) => `${contact.title} ${contact.subtitle} ${contact.preview}`.toLowerCase().includes(query.trim().toLowerCase()));
   const unread = contacts.reduce((sum, contact) => sum + Number(contact.unread || 0), 0);

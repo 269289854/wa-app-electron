@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, net, safeStorage } from 'electron';
+import { app, BrowserWindow, ipcMain, safeStorage } from 'electron';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createServer } from 'node:net';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -98,7 +98,8 @@ function setPassword(config: StoredConfig, password?: string) {
   if (password === undefined) return config;
   const trimmed = password.trim();
   if (!trimmed) {
-    const { encryptedPassword: _removed, ...rest } = config;
+    const rest = { ...config };
+    delete rest.encryptedPassword;
     return rest;
   }
   const encoded = safeStorage.isEncryptionAvailable()
