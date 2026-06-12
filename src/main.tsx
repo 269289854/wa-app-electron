@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { HashRouter, Navigate, Route, Routes, useNavigate, useParams } from 'react-router';
 import {
   AtSign,
   Check,
@@ -77,13 +78,22 @@ type View = 'chats' | 'account' | 'add' | 'settings';
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <DesktopApp />
+      <HashRouter>
+        <Routes>
+          <Route path="/" element={<Navigate to="/chats" replace />} />
+          <Route path="/:view" element={<DesktopApp />} />
+          <Route path="*" element={<Navigate to="/chats" replace />} />
+        </Routes>
+      </HashRouter>
     </QueryClientProvider>
   );
 }
 
 function DesktopApp() {
-  const [view, setView] = useState<View>('chats');
+  const navigate = useNavigate();
+  const routeView = useParams<{ view?: string }>().view;
+  const view = routeView === 'account' || routeView === 'add' || routeView === 'settings' || routeView === 'chats' ? routeView : 'chats';
+  const setView = (next: View) => navigate(`/${next}`);
   const [selectedAccountID, setSelectedAccountID] = useState('');
   const [selectedContactID, setSelectedContactID] = useState('');
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -112,11 +122,15 @@ function DesktopApp() {
     if (!selectedAccountID && accounts[0]) setSelectedAccountID(accountID(accounts[0]));
   }, [accounts, selectedAccountID]);
 
+  useEffect(() => {
+    if (routeView && view !== routeView) navigate('/chats', { replace: true });
+  }, [navigate, routeView, view]);
+
   const selectedAccount = accounts.find((account) => accountID(account) === selectedAccountID);
   const connected = connectionQuery.data?.ok === true;
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-view={view}>
       <aside className="account-rail">
         <div className="brand-block">
           <div className="brand-mark">WA</div>
@@ -170,7 +184,7 @@ function DesktopApp() {
             void accountsQuery.refetch();
           }}
         />
-        {!connected ? (
+        {!connected && view !== 'settings' ? (
           <SettingsPanel notify={notify} compact={false} />
         ) : view === 'add' ? (
           <AddAccountPanel notify={notify} onChanged={() => void accountsQuery.refetch()} />

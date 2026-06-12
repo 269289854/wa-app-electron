@@ -269,6 +269,16 @@ async function retryEvaluate(client, expression, attempts = 3, timeoutMs = 20000
   throw new Error('retry evaluation failed');
 }
 
+async function navigateHashAndVerify(client, hash, selectorExpression) {
+  await evaluate(client, `window.location.hash = ${JSON.stringify(hash)}; true`);
+  const changed = await waitForExpression(client, selectorExpression, 10000);
+  if (!changed) throw new Error(`Route ${hash} did not render expected view`);
+  await client.send('Page.reload', { ignoreCache: true }, 10000);
+  const restored = await waitForExpression(client, selectorExpression, 15000);
+  if (!restored) throw new Error(`Route ${hash} did not survive reload`);
+  return evaluate(client, 'window.location.hash');
+}
+
 async function main() {
   const tabs = await getJson('/json');
   const page = tabs.find((item) => item.type === 'page' && item.title === 'WA App') || tabs.find((item) => item.type === 'page');
@@ -288,6 +298,7 @@ async function main() {
     renderer.passwordFields = await evaluate(client, 'document.querySelectorAll("input[type=password]").length');
     if (scenario === 'configured') {
       renderer.connection = await retryEvaluate(client, 'window.waConfig.testConnection().then((result) => ({ ok: result.ok === true, hasHealth: Boolean(result.health), error: result.error || "" }))', 3, 20000);
+      renderer.settingsHashAfterReload = await navigateHashAndVerify(client, '#/settings', 'Boolean(document.querySelector(".app-shell[data-view=settings]") && document.querySelector(".settings-page"))');
     }
   } finally {
     client.close();
