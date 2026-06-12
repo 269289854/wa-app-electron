@@ -20,6 +20,7 @@ export type SMSBowerPublicConfig = {
   maxPrice: number;
   targetSuccessCount: number;
   maxOrders: number;
+  numberIntervalSeconds: number;
   pollIntervalSeconds: number;
   otpTimeoutSeconds: number;
   hasApiKey: boolean;
@@ -89,6 +90,7 @@ export function defaultSMSBowerConfig(): SMSBowerStoredConfig {
     maxPrice: 0,
     targetSuccessCount: 1,
     maxOrders: 3,
+    numberIntervalSeconds: 0,
     pollIntervalSeconds: 5,
     otpTimeoutSeconds: 600,
   };
@@ -103,6 +105,7 @@ export function normalizeSMSBowerConfig(config?: Partial<SMSBowerStoredConfig>):
     maxPrice: boundedDecimal(config?.maxPrice, 0, 1000, fallback.maxPrice),
     targetSuccessCount: boundedNumber(config?.targetSuccessCount, 1, 100, fallback.targetSuccessCount),
     maxOrders: boundedNumber(config?.maxOrders, 1, 1000, fallback.maxOrders),
+    numberIntervalSeconds: boundedNumber(config?.numberIntervalSeconds, 0, 3600, fallback.numberIntervalSeconds),
     pollIntervalSeconds: boundedNumber(config?.pollIntervalSeconds, 2, 120, fallback.pollIntervalSeconds),
     otpTimeoutSeconds: boundedNumber(config?.otpTimeoutSeconds, 30, 3600, fallback.otpTimeoutSeconds),
     encryptedApiKey: config?.encryptedApiKey,
@@ -144,6 +147,7 @@ export function publicSMSBowerConfig(config: SMSBowerStoredConfig): SMSBowerPubl
     maxPrice: config.maxPrice,
     targetSuccessCount: config.targetSuccessCount,
     maxOrders: config.maxOrders,
+    numberIntervalSeconds: config.numberIntervalSeconds,
     pollIntervalSeconds: config.pollIntervalSeconds,
     otpTimeoutSeconds: config.otpTimeoutSeconds,
     hasApiKey,

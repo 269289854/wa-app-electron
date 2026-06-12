@@ -20,6 +20,7 @@ type SMSBowerPublicConfig = {
   maxPrice: number;
   targetSuccessCount: number;
   maxOrders: number;
+  numberIntervalSeconds: number;
   pollIntervalSeconds: number;
   otpTimeoutSeconds: number;
   hasApiKey: boolean;

@@ -828,6 +828,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
       maxPrice: config.maxPrice,
       targetSuccessCount: config.targetSuccessCount,
       maxOrders: config.maxOrders,
+      numberIntervalSeconds: config.numberIntervalSeconds,
     }));
     const prices = await window.smsbower.getPrices({ country: config.country });
     appendDebugExchange(setDebugExchanges, debugInfo('SMSBower prices', {
@@ -845,6 +846,16 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
     let successes = 0;
     let orders = 0;
     while (successes < config.targetSuccessCount && orders < config.maxOrders && !stopPlatformRef.current) {
+      const nextOrder = orders + 1;
+      if (orders > 0 && config.numberIntervalSeconds > 0) {
+        setPlatformState((state) => ({ ...state, stage: 'number', message: `Waiting ${config.numberIntervalSeconds}s before next number` }));
+        appendDebugExchange(setDebugExchanges, debugInfo('SMSBower number interval', {
+          seconds: config.numberIntervalSeconds,
+          nextOrder,
+        }));
+        await delayWithStop(config.numberIntervalSeconds * 1000, stopPlatformRef);
+        if (stopPlatformRef.current) break;
+      }
       orders += 1;
       setPlatformState((state) => ({ ...state, stage: 'number', orders, message: `Buying number ${orders}/${config.maxOrders}` }));
       const numberExchange = debugRequest('SMSBower getNumber', 'smsbower:getNumber', { country: config.country, service: 'wa', maxPrice: config.maxPrice });
@@ -1184,7 +1195,7 @@ type SettingsForm = {
   smsbowerApiKey: string;
   smsbower: Pick<
     SMSBowerPublicConfig,
-    'enabled' | 'country' | 'minPrice' | 'maxPrice' | 'targetSuccessCount' | 'maxOrders' | 'pollIntervalSeconds' | 'otpTimeoutSeconds'
+    'enabled' | 'country' | 'minPrice' | 'maxPrice' | 'targetSuccessCount' | 'maxOrders' | 'numberIntervalSeconds' | 'pollIntervalSeconds' | 'otpTimeoutSeconds'
   >;
 };
 
@@ -1358,6 +1369,13 @@ function delay(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+async function delayWithStop(ms: number, stopRef: React.MutableRefObject<boolean>) {
+  const started = Date.now();
+  while (Date.now() - started < ms && !stopRef.current) {
+    await delay(Math.min(250, ms - (Date.now() - started)));
+  }
+}
+
 function platformStageLabel(stage: SMSBowerStage) {
   const labels: Record<SMSBowerStage, string> = {
     idle: '空闲',
@@ -1483,6 +1501,10 @@ function SMSBowerSettingsFields({
           <input value={form.smsbower.maxOrders} onChange={(event) => updateSMSBower({ maxOrders: Number(event.target.value) })} type="number" min="1" />
         </label>
         <label>
+          获取手机号间隔（秒）
+          <input value={form.smsbower.numberIntervalSeconds} onChange={(event) => updateSMSBower({ numberIntervalSeconds: Number(event.target.value) })} type="number" min="0" placeholder="0 表示不等待" />
+        </label>
+        <label>
           轮询间隔秒
           <input value={form.smsbower.pollIntervalSeconds} onChange={(event) => updateSMSBower({ pollIntervalSeconds: Number(event.target.value) })} type="number" min="2" />
         </label>
@@ -1520,6 +1542,7 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
       maxPrice: 0,
       targetSuccessCount: 1,
       maxOrders: 3,
+      numberIntervalSeconds: 0,
       pollIntervalSeconds: 5,
       otpTimeoutSeconds: 600,
     },
@@ -1539,6 +1562,7 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
         maxPrice: configQuery.data.smsbower.maxPrice,
         targetSuccessCount: configQuery.data.smsbower.targetSuccessCount,
         maxOrders: configQuery.data.smsbower.maxOrders,
+        numberIntervalSeconds: configQuery.data.smsbower.numberIntervalSeconds,
         pollIntervalSeconds: configQuery.data.smsbower.pollIntervalSeconds,
         otpTimeoutSeconds: configQuery.data.smsbower.otpTimeoutSeconds,
       },

@@ -32,7 +32,7 @@ describe('electron config helpers', () => {
     expect(config.mode).toBe('remote');
     expect(config.remoteBaseUrl).toBe('https://wa.yizhimeng.uk');
     expect(config.localDataDir).toContain('wa-app-data');
-    expect(config.smsbower).toMatchObject({ enabled: false, targetSuccessCount: 1, maxOrders: 3 });
+    expect(config.smsbower).toMatchObject({ enabled: false, targetSuccessCount: 1, maxOrders: 3, numberIntervalSeconds: 0 });
     expect(config.windowState).toEqual({ width: 1320, height: 860 });
   });
 
@@ -65,6 +65,7 @@ describe('electron config helpers', () => {
         maxPrice: 0.48,
         targetSuccessCount: 1.8,
         maxOrders: 2.2,
+        numberIntervalSeconds: 10.6,
         pollIntervalSeconds: 4.7,
         otpTimeoutSeconds: 90.2,
       },
@@ -73,8 +74,16 @@ describe('electron config helpers', () => {
     expect(config.smsbower.maxPrice).toBe(0.48);
     expect(config.smsbower.targetSuccessCount).toBe(2);
     expect(config.smsbower.maxOrders).toBe(2);
+    expect(config.smsbower.numberIntervalSeconds).toBe(11);
     expect(config.smsbower.pollIntervalSeconds).toBe(5);
     expect(config.smsbower.otpTimeoutSeconds).toBe(90);
+  });
+
+  it('allows SMSBower number interval to be disabled with zero or invalid values', () => {
+    const base = defaultConfig('C:/data').smsbower;
+    expect(normalizeConfig({ ...defaultConfig('C:/data'), smsbower: { ...base, numberIntervalSeconds: 0 } }, 'C:/data').smsbower.numberIntervalSeconds).toBe(0);
+    expect(normalizeConfig({ ...defaultConfig('C:/data'), smsbower: { ...base, numberIntervalSeconds: -5 } }, 'C:/data').smsbower.numberIntervalSeconds).toBe(0);
+    expect(normalizeConfig({ ...defaultConfig('C:/data'), smsbower: { ...base, numberIntervalSeconds: 'bad' as unknown as number } }, 'C:/data').smsbower.numberIntervalSeconds).toBe(0);
   });
 
   it('bounds persisted window state', () => {
