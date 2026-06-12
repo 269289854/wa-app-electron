@@ -33,6 +33,7 @@ import {
   contactAvatarPath,
   deleteAccount,
   deleteContact,
+  deleteMessages,
   getAccounts,
   getClientProfiles,
   getConnections,
@@ -47,6 +48,7 @@ import {
   probePhoneSMS,
   registerPhone,
   removeProfilePicture,
+  resolveContacts,
   requestEmailOtp,
   sendTextMessage,
   setAccountEmail,
@@ -252,6 +254,28 @@ function ChatPanel({ account, selectedContactID, onSelectContact, notify }: { ac
     onError: (error) => notify('error', errorMessage(error)),
     onSettled: () => void queryClient.invalidateQueries({ queryKey: ['contacts', accountId] }),
   });
+  const resolveAttemptedRef = useRef('');
+  const { mutate: resolveContactJIDs, isPending: resolvingContacts } = useMutation({
+    mutationFn: (jids: string[]) => resolveContacts(accountId, jids),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ['contacts', accountId] }),
+  });
+  useEffect(() => {
+    const targets = unresolvedContactJIDs(contactsQuery.data?.contacts || []);
+    const signature = `${accountId}:${targets.join('\n')}`;
+    if (!accountId || targets.length === 0 || resolvingContacts || resolveAttemptedRef.current === signature) return;
+    resolveAttemptedRef.current = signature;
+    resolveContactJIDs(targets);
+  }, [accountId, contactsQuery.data?.contacts, resolveContactJIDs, resolvingContacts]);
+  const deleteMessageMutation = useMutation({
+    mutationFn: (messageID: string) => deleteMessages(accountId, [messageID]),
+    onSuccess: () => notify('success', '消息已删除'),
+    onError: (error) => notify('error', errorMessage(error)),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['messages', accountId, activeContactID] });
+      void queryClient.invalidateQueries({ queryKey: ['contacts', accountId] });
+      void queryClient.invalidateQueries({ queryKey: ['otp', accountId] });
+    },
+  });
 
   if (!account) return <EmptyState icon={<MessageCircle />} title="选择账号" detail="左侧选择账号后查看联系人和消息。" />;
   return (
@@ -276,6 +300,10 @@ function ChatPanel({ account, selectedContactID, onSelectContact, notify }: { ac
         loading={messagesQuery.isFetching}
         sending={sendMutation.isPending}
         onSend={(text) => sendMutation.mutate(text)}
+        deletingMessageID={deleteMessageMutation.variables}
+        onDeleteMessage={(messageID) => {
+          if (window.confirm('删除这条本地消息？')) deleteMessageMutation.mutate(messageID);
+        }}
       />
     </section>
   );
@@ -321,7 +349,25 @@ function ContactList({ contacts, loading, activeID, onSelect, onDelete }: { acco
   );
 }
 
-function Thread({ accountID: _accountID, contact, messages, loading, sending, onSend }: { accountID: string; contact?: ReturnType<typeof normalizeContacts>[number]; messages: AccountMessage[]; loading: boolean; sending: boolean; onSend: (text: string) => void }) {
+function Thread({
+  accountID: _accountID,
+  contact,
+  messages,
+  loading,
+  sending,
+  deletingMessageID,
+  onSend,
+  onDeleteMessage,
+}: {
+  accountID: string;
+  contact?: ReturnType<typeof normalizeContacts>[number];
+  messages: AccountMessage[];
+  loading: boolean;
+  sending: boolean;
+  deletingMessageID?: string;
+  onSend: (text: string) => void;
+  onDeleteMessage: (messageID: string) => void;
+}) {
   const [text, setText] = useState('');
   const sorted = [...messages].sort((left, right) => Number(messageTime(left)?.getTime() || 0) - Number(messageTime(right)?.getTime() || 0));
   return (
@@ -335,7 +381,14 @@ function Thread({ accountID: _accountID, contact, messages, loading, sending, on
         {loading ? <Loader2 className="spin muted-icon" size={16} /> : null}
       </div>
       <div className="message-list">
-        {sorted.map((message, index) => <MessageBubble key={message.account_message_id || message.message_id || index} message={message} />)}
+        {sorted.map((message, index) => (
+          <MessageBubble
+            key={message.account_message_id || message.message_id || index}
+            message={message}
+            deleting={deletingMessageID === message.account_message_id}
+            onDelete={onDeleteMessage}
+          />
+        ))}
         {!loading && sorted.length === 0 ? <EmptyState icon={<MessageCircle />} title="暂无消息" detail="收到消息后会显示在这里。" /> : null}
       </div>
       <form
@@ -357,13 +410,21 @@ function Thread({ accountID: _accountID, contact, messages, loading, sending, on
   );
 }
 
-function MessageBubble({ message }: { message: AccountMessage }) {
+function MessageBubble({ message, deleting, onDelete }: { message: AccountMessage; deleting: boolean; onDelete: (messageID: string) => void }) {
   const outgoing = String(message.direction || '').toLowerCase().includes('out') || String(message.ack_status || '').length > 0;
+  const messageID = message.account_message_id || '';
   return (
     <div className={`bubble-line ${outgoing ? 'outgoing' : 'incoming'}`}>
       <div className="bubble">
         <p>{messageText(message) || '[非文本消息]'}</p>
-        <time>{formatDate(messageTime(message), true)}</time>
+        <span className="bubble-meta">
+          <time>{formatDate(messageTime(message), true)}</time>
+          {messageID ? (
+            <button className="message-delete-button" disabled={deleting} title="删除消息" onClick={() => onDelete(messageID)}>
+              {deleting ? <Loader2 className="spin" size={13} /> : <Trash2 size={13} />}
+            </button>
+          ) : null}
+        </span>
       </div>
     </div>
   );
@@ -493,7 +554,7 @@ function ProfileCard({ account, notify, onChanged }: { account: WAAccount; notif
               <img src={pendingPicture.dataUrl} alt={pendingPicture.fileName} style={{ transform: `scale(${pendingPicture.scale})` }} />
             </div>
             <label>
-              ????
+              头像缩放
               <input
                 type="range"
                 min="1"
@@ -506,9 +567,9 @@ function ProfileCard({ account, notify, onChanged }: { account: WAAccount; notif
             <div className="inline-actions">
               <button className="primary-button" disabled={pictureMutation.isPending} onClick={() => pictureMutation.mutate()}>
                 <Check size={15} />
-                ????
+                提交头像
               </button>
-              <button className="secondary-button" onClick={resetPicture}>??</button>
+              <button className="secondary-button" onClick={resetPicture}>取消</button>
             </div>
           </div>
         ) : null}
@@ -888,6 +949,21 @@ function requirePhone(input: PhoneInput | null) {
   return input;
 }
 
+function unresolvedContactJIDs(records: Array<{ jid?: string; display_name?: string; number?: string; profile_picture_id?: string }>) {
+  const targets: string[] = [];
+  const seen = new Set<string>();
+  for (const record of records) {
+    const jid = String(record.jid || '').trim();
+    const displayName = String(record.display_name || '').trim();
+    const needsResolve = !record.profile_picture_id || !record.number || !displayName || displayName === '未知联系人' || displayName.startsWith('LID ') || displayName.startsWith('联系人');
+    if (!jid.endsWith('@lid') || !needsResolve || seen.has(jid)) continue;
+    seen.add(jid);
+    targets.push(jid);
+    if (targets.length >= 20) break;
+  }
+  return targets;
+}
+
 function readFileDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -907,7 +983,7 @@ function cropAvatarDataUrl(sourceDataUrl: string, scale: number) {
       canvas.height = size;
       const context = canvas.getContext('2d');
       if (!context) {
-        reject(new Error('??????'));
+        reject(new Error('无法创建图片画布'));
         return;
       }
       context.fillStyle = '#ffffff';
@@ -918,7 +994,7 @@ function cropAvatarDataUrl(sourceDataUrl: string, scale: number) {
       context.drawImage(image, sx, sy, sourceSize, sourceSize, 0, 0, size, size);
       resolve(canvas.toDataURL('image/jpeg', 0.92));
     };
-    image.onerror = () => reject(new Error('????????'));
+    image.onerror = () => reject(new Error('头像图片读取失败'));
     image.src = sourceDataUrl;
   });
 }

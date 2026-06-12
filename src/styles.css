@@ -182,7 +182,21 @@ button { cursor: pointer; }
 .bubble { max-width: min(680px, 78%); border-radius: 16px; border: 1px solid #dce3eb; background: #fff; padding: 10px 12px; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04); }
 .outgoing .bubble { background: #dcfce7; border-color: #bbf7d0; }
 .bubble p { margin: 0; white-space: pre-wrap; line-height: 1.5; }
-.bubble time { display: block; margin-top: 6px; color: #6b7685; font-size: 11px; }
+.bubble-meta { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-height: 22px; margin-top: 6px; color: #6b7685; font-size: 11px; }
+.message-delete-button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #b42318;
+  opacity: 0;
+}
+.bubble:hover .message-delete-button, .message-delete-button:focus-visible { opacity: 1; }
+.message-delete-button:disabled { opacity: 0.7; cursor: default; }
+.message-delete-button:hover:not(:disabled) { background: rgba(180, 35, 24, 0.1); }
 .composer { display: grid; grid-template-columns: 1fr 44px; gap: 10px; border-top: 1px solid #dde1e7; padding: 12px; background: #fff; }
 .composer button { border: 0; border-radius: 8px; background: #139f53; color: white; }
 
