@@ -9,6 +9,7 @@ type ClientConfig = {
   localDataDir: string;
   autoStartLocalService: boolean;
   hasPassword: boolean;
+  authPasswordRef: string;
 };
 
 type ConnectionTestResult = {

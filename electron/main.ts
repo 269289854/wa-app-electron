@@ -14,6 +14,7 @@ type ClientConfig = {
   localDataDir: string;
   autoStartLocalService: boolean;
   hasPassword: boolean;
+  authPasswordRef: string;
 };
 
 type WindowState = {
@@ -24,7 +25,7 @@ type WindowState = {
   maximized?: boolean;
 };
 
-type StoredConfig = Omit<ClientConfig, 'hasPassword'> & {
+type StoredConfig = Omit<ClientConfig, 'hasPassword' | 'authPasswordRef'> & {
   encryptedPassword?: string;
   windowState?: WindowState;
 };
@@ -100,7 +101,8 @@ function boundedNumber(value: unknown, min: number, max: number, fallback: numbe
 }
 
 function publicConfig(config = readConfig()): ClientConfig {
-  return { ...config, hasPassword: Boolean(config.encryptedPassword) };
+  const hasPassword = Boolean(config.encryptedPassword);
+  return { ...config, hasPassword, authPasswordRef: hasPassword ? 'electron-safe-storage:wa-app-auth-password' : '' };
 }
 
 function writeConfig(next: StoredConfig) {

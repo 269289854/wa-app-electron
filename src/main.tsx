@@ -418,8 +418,14 @@ function AccountPanel({ account, notify, onChanged }: { account?: WAAccount; not
 function ProfileCard({ account, notify, onChanged }: { account: WAAccount; notify: (kind: Toast['kind'], message: string) => void; onChanged: () => void }) {
   const [name, setName] = useState(account.display_name || '');
   const [fileName, setFileName] = useState('');
+  const [pendingPicture, setPendingPicture] = useState<{ fileName: string; dataUrl: string; scale: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const accountId = accountID(account);
+  const resetPicture = () => {
+    setPendingPicture(null);
+    setFileName('');
+    if (fileRef.current) fileRef.current.value = '';
+  };
   const nameMutation = useMutation({
     mutationFn: () => setProfileName(accountId, name.trim()),
     onSuccess: () => {
@@ -429,9 +435,10 @@ function ProfileCard({ account, notify, onChanged }: { account: WAAccount; notif
     onError: (error) => notify('error', errorMessage(error)),
   });
   const pictureMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const dataUrl = await readFileDataUrl(file);
-      return setProfilePicture(accountId, dataUrl.slice(dataUrl.indexOf(',') + 1), file.type || 'image/jpeg');
+    mutationFn: async () => {
+      if (!pendingPicture) throw new Error('请选择头像图片');
+      const dataUrl = await cropAvatarDataUrl(pendingPicture.dataUrl, pendingPicture.scale);
+      return setProfilePicture(accountId, dataUrl.slice(dataUrl.indexOf(',') + 1), 'image/jpeg');
     },
     onSuccess: () => {
       notify('success', '头像已提交');
@@ -470,14 +477,41 @@ function ProfileCard({ account, notify, onChanged }: { account: WAAccount; notif
               notify('error', '头像图片不能超过 2 MiB');
               return;
             }
-            setFileName(file.name);
-            pictureMutation.mutate(file);
+            readFileDataUrl(file).then((dataUrl) => {
+              setFileName(file.name);
+              setPendingPicture({ fileName: file.name, dataUrl, scale: 1 });
+            }).catch((error) => notify('error', errorMessage(error)));
           }}
         />
         <button className="secondary-button" onClick={() => fileRef.current?.click()}>
           <Upload size={15} />
           {fileName || '上传头像'}
         </button>
+        {pendingPicture ? (
+          <div className="avatar-cropper">
+            <div className="crop-preview">
+              <img src={pendingPicture.dataUrl} alt={pendingPicture.fileName} style={{ transform: `scale(${pendingPicture.scale})` }} />
+            </div>
+            <label>
+              ????
+              <input
+                type="range"
+                min="1"
+                max="2.5"
+                step="0.05"
+                value={pendingPicture.scale}
+                onChange={(event) => setPendingPicture({ ...pendingPicture, scale: Number(event.target.value) })}
+              />
+            </label>
+            <div className="inline-actions">
+              <button className="primary-button" disabled={pictureMutation.isPending} onClick={() => pictureMutation.mutate()}>
+                <Check size={15} />
+                ????
+              </button>
+              <button className="secondary-button" onClick={resetPicture}>??</button>
+            </div>
+          </div>
+        ) : null}
         <button className="secondary-button" onClick={() => removeMutation.mutate()}>移除头像</button>
       </div>
     </InfoCard>
@@ -722,6 +756,7 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
             <label>
               访问密码
               <input value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} type="password" placeholder={configQuery.data?.hasPassword ? '已保存，留空不修改' : '请输入访问密码'} />
+              {configQuery.data?.authPasswordRef ? <span className="field-hint">Password saved in local secure storage</span> : null}
             </label>
             <label>
               本地数据目录
@@ -859,6 +894,32 @@ function readFileDataUrl(file: File) {
     reader.onload = () => resolve(String(reader.result || ''));
     reader.onerror = () => reject(new Error('读取图片失败'));
     reader.readAsDataURL(file);
+  });
+}
+
+function cropAvatarDataUrl(sourceDataUrl: string, scale: number) {
+  return new Promise<string>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const size = 512;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const context = canvas.getContext('2d');
+      if (!context) {
+        reject(new Error('??????'));
+        return;
+      }
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, size, size);
+      const sourceSize = Math.min(image.naturalWidth, image.naturalHeight) / Math.max(1, scale);
+      const sx = Math.max(0, (image.naturalWidth - sourceSize) / 2);
+      const sy = Math.max(0, (image.naturalHeight - sourceSize) / 2);
+      context.drawImage(image, sx, sy, sourceSize, sourceSize, 0, 0, size, size);
+      resolve(canvas.toDataURL('image/jpeg', 0.92));
+    };
+    image.onerror = () => reject(new Error('????????'));
+    image.src = sourceDataUrl;
   });
 }
 
