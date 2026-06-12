@@ -63,6 +63,7 @@ import {
 } from './api';
 import { normalizePhoneInput } from './phone-input';
 import { probeStatus, registrationMethods, statusReason } from './result-model';
+import { countryDisplayName, filterSMSBowerCountries, normalizeSMSBowerCountries, type SMSBowerCountry } from './smsbower-countries';
 import type { AccountMessage, ClientProfile, WAAccount, WorkflowResponse } from './types';
 
 const queryClient = new QueryClient({
@@ -770,6 +771,12 @@ function SecurityCard({ account, notify }: { account: WAAccount; notify: (kind: 
 function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], message: string) => void; onChanged: () => void }) {
   const queryClient = useQueryClient();
   const configQuery = useQuery({ queryKey: ['config'], queryFn: () => window.waConfig.get() });
+  const smsbowerCountriesQuery = useQuery({
+    queryKey: ['smsbower-countries'],
+    queryFn: async () => normalizeSMSBowerCountries(await window.smsbower.getCountries()),
+    enabled: Boolean(configQuery.data?.smsbower.hasApiKey),
+    staleTime: 60 * 60 * 1000,
+  });
   const [countryCallingCode, setCountryCallingCode] = useState('');
   const [phone, setPhone] = useState('');
   const [probe, setProbe] = useState<WorkflowResponse | null>(null);
@@ -838,8 +845,8 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
         patchDebugExchange(setDebugExchanges, numberExchange, { ...numberExchange, response: sanitizeDebugValue(number) });
       } catch (error) {
         patchDebugExchange(setDebugExchanges, numberExchange, { ...numberExchange, error: debugError(error) });
-        appendDebugExchange(setDebugExchanges, debugInfo('SMSBower order skipped', { order: orders, error: errorMessage(error) }));
-        continue;
+        appendDebugExchange(setDebugExchanges, debugInfo('SMSBower task stopped', { order: orders, error: errorMessage(error) }));
+        throw error;
       }
 
       const normalized = normalizePhoneInput(number.phone, '');
@@ -969,6 +976,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
     onError: (error) => notify('error', errorMessage(error)),
   });
   const platformConfigured = Boolean(configQuery.data?.smsbower.configured);
+  const platformCountryLabel = countryDisplayName(smsbowerCountriesQuery.data || [], configQuery.data?.smsbower.country || '');
   const platformBusy = platformRegisterMutation.isPending;
   const addAccountBusy = probeAndRegisterMutation.isPending || otpMutation.isPending || platformBusy;
   useEffect(() => {
@@ -1054,7 +1062,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
         <InfoCard title="SMSBower 平台注册" icon={<MessageCircle size={17} />}>
           <div className="platform-register">
             <div className="platform-stats">
-              <span>国家 {configQuery.data?.smsbower.country || '-'}</span>
+              <span>国家 {platformCountryLabel || '-'}</span>
               <span>价格 {configQuery.data?.smsbower.minPrice}-{configQuery.data?.smsbower.maxPrice}</span>
               <span>成功 {platformState.successes}/{configQuery.data?.smsbower.targetSuccessCount || 0}</span>
               <span>下单 {platformState.orders}/{configQuery.data?.smsbower.maxOrders || 0}</span>
@@ -1316,11 +1324,22 @@ function SMSBowerSettingsFields({
   form,
   setForm,
   hasApiKey,
+  countries,
+  countriesLoading,
+  countriesError,
+  onReloadCountries,
 }: {
   form: SettingsForm;
   setForm: React.Dispatch<React.SetStateAction<SettingsForm>>;
   hasApiKey?: boolean;
+  countries: SMSBowerCountry[];
+  countriesLoading: boolean;
+  countriesError?: string;
+  onReloadCountries: () => void;
 }) {
+  const [countryQuery, setCountryQuery] = useState('');
+  const filteredCountries = filterSMSBowerCountries(countries, countryQuery).slice(0, 80);
+  const selectedCountryLabel = countryDisplayName(countries, form.smsbower.country);
   const updateSMSBower = (patch: Partial<SettingsForm['smsbower']>) => setForm((current) => ({
     ...current,
     smsbower: { ...current.smsbower, ...patch },
@@ -1341,10 +1360,46 @@ function SMSBowerSettingsFields({
         />
       </label>
       <div className="form-grid two">
-        <label>
+        <div className="form-field">
           国家
-          <input value={form.smsbower.country} onChange={(event) => updateSMSBower({ country: event.target.value })} placeholder="例如 187" />
-        </label>
+          <input
+            value={countryQuery}
+            onChange={(event) => setCountryQuery(event.target.value)}
+            placeholder={hasApiKey ? '搜索国家名称或 ID' : '先保存 SMSBower API Key'}
+            disabled={!hasApiKey}
+          />
+          <span className="field-hint">{selectedCountryLabel ? `已选择：${selectedCountryLabel}` : '请选择 SMSBower 国家列表里的国家 ID。'}</span>
+          {countriesLoading ? <span className="field-hint">正在加载国家列表...</span> : null}
+          {countriesError ? <span className="field-hint">{countriesError}</span> : null}
+          {hasApiKey ? (
+            <div className="country-picker">
+              <div className="inline-actions">
+                <button className="secondary-button" type="button" onClick={onReloadCountries}>刷新国家</button>
+                <input value={form.smsbower.country} onChange={(event) => updateSMSBower({ country: event.target.value })} placeholder="手动输入国家 ID" />
+              </div>
+              {filteredCountries.length ? (
+                <div className="country-options">
+                  {filteredCountries.map((country) => (
+                    <button
+                      className={country.id === form.smsbower.country ? 'selected' : ''}
+                      key={country.id}
+                      type="button"
+                      onClick={() => {
+                        updateSMSBower({ country: country.id });
+                        setCountryQuery(country.name);
+                      }}
+                    >
+                      <span>{country.name}</span>
+                      <small>ID: {country.id}</small>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <span className="field-hint">没有匹配国家，可使用手动国家 ID。</span>
+              )}
+            </div>
+          ) : null}
+        </div>
         <label>
           目标成功数
           <input value={form.smsbower.targetSuccessCount} onChange={(event) => updateSMSBower({ targetSuccessCount: Number(event.target.value) })} type="number" min="1" />
@@ -1379,6 +1434,12 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
   const queryClient = useQueryClient();
   const configQuery = useQuery({ queryKey: ['config'], queryFn: () => window.waConfig.get() });
   const serviceQuery = useQuery({ queryKey: ['service'], queryFn: () => window.waService.status(), refetchInterval: 10000 });
+  const smsbowerCountriesQuery = useQuery({
+    queryKey: ['smsbower-countries'],
+    queryFn: async () => normalizeSMSBowerCountries(await window.smsbower.getCountries()),
+    enabled: Boolean(configQuery.data?.smsbower.hasApiKey),
+    staleTime: 60 * 60 * 1000,
+  });
   const [form, setForm] = useState<SettingsForm>({
     mode: 'remote' as ClientMode,
     remoteBaseUrl: '',
@@ -1480,7 +1541,15 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
               <input checked={form.autoStartLocalService} onChange={(event) => setForm({ ...form, autoStartLocalService: event.target.checked })} type="checkbox" />
               本地模式启动时自动启动服务
             </label>
-            <SMSBowerSettingsFields form={form} setForm={setForm} hasApiKey={configQuery.data?.smsbower.hasApiKey} />
+            <SMSBowerSettingsFields
+              form={form}
+              setForm={setForm}
+              hasApiKey={configQuery.data?.smsbower.hasApiKey}
+              countries={smsbowerCountriesQuery.data || []}
+              countriesLoading={smsbowerCountriesQuery.isFetching}
+              countriesError={smsbowerCountriesQuery.error ? errorMessage(smsbowerCountriesQuery.error) : ''}
+              onReloadCountries={() => void smsbowerCountriesQuery.refetch()}
+            />
             <div className="inline-actions">
               <button className="primary-button" onClick={() => saveMutation.mutate()}>
                 <Save size={15} />
@@ -1801,6 +1870,8 @@ function errorMessage(error: unknown) {
   if (normalized.includes('reason=blocked') || normalized.includes('number is blocked')) return '号码被 WhatsApp 拒绝或封禁，当前协议链路无法发起验证码。';
   if (normalized.includes('too_recent') || normalized.includes('too_many') || normalized.includes('cooling down') || normalized.includes('rate_limited')) return '请求过于频繁，正在冷却中，请稍后再试。';
   if (normalized.includes('no_routes') || normalized.includes('route_unavailable')) return '暂无可用验证码通道，请换 SMS/语音或稍后再试。';
+  if (normalized.includes('smsbower has no numbers')) return 'SMSBower 当前无法按这个国家/价格下单：平台返回 NO_NUMBERS。请检查国家参数是否为 SMSBower 国家 ID，或提高最高价格/更换国家后再试。';
+  if (normalized.includes('smsbower balance is insufficient')) return 'SMSBower 余额不足，平台返回 NO_BALANCE。';
   return message;
 }
 

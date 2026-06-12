@@ -87,7 +87,7 @@ interface Window {
   smsbower: {
     status(): Promise<{ configured: boolean; config: SMSBowerPublicConfig }>;
     getBalance(): Promise<string>;
-    getCountries(): Promise<Record<string, unknown>>;
+    getCountries(): Promise<unknown>;
     getPrices(input?: { country?: string }): Promise<SMSBowerPrice[]>;
     getNumber(input?: { country?: string; maxPrice?: number }): Promise<SMSBowerNumberResult>;
     getStatus(id: string): Promise<SMSBowerStatusResult>;
@@ -113,7 +113,7 @@ interface Window {
     smsbower: {
       status(): Promise<{ configured: boolean; config: SMSBowerPublicConfig }>;
       getBalance(): Promise<string>;
-      getCountries(): Promise<Record<string, unknown>>;
+      getCountries(): Promise<unknown>;
       getPrices(input?: { country?: string }): Promise<SMSBowerPrice[]>;
       getNumber(input?: { country?: string; maxPrice?: number }): Promise<SMSBowerNumberResult>;
       getStatus(id: string): Promise<SMSBowerStatusResult>;
