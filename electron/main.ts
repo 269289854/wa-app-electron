@@ -134,10 +134,22 @@ async function testConnection(configPatch?: Partial<ClientConfig> & { password?:
   const next = normalizeConfig(setPassword({ ...previous, ...configPatch }, configPatch?.password));
   writeConfig(next);
   try {
-    const health = await requestJSON<Record<string, unknown>>({ path: '/api/wa/health', timeoutMs: 10000 });
+    const health = await requestHealth();
     return { ok: true, health, config: publicConfig(next) };
   } catch (error) {
     return { ok: false, error: errorMessage(error), config: publicConfig(next) };
+  }
+}
+
+async function requestHealth() {
+  try {
+    return await requestJSON<Record<string, unknown>>({ path: '/api/wa/health', timeoutMs: 10000 });
+  } catch (primaryError) {
+    try {
+      return await requestJSON<Record<string, unknown>>({ path: '/healthz', timeoutMs: 10000 });
+    } catch {
+      throw primaryError;
+    }
   }
 }
 

@@ -50,7 +50,7 @@ function readBody(req) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', 'http://127.0.0.1');
   const path = url.pathname;
-  if (path === '/api/wa/health') return json(res, { ok: true, service: 'mock-wa-app' });
+  if (path === '/healthz') return json(res, { ok: true, service: 'mock-wa-app', path: '/healthz' });
   if (path === '/__operations') return json(res, { operations });
   if (path === '/api/wa/accounts') return json(res, {
     accounts: [{

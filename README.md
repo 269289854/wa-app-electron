@@ -43,7 +43,7 @@ Remove-Item Env:\WA_APP_ELECTRON_SMOKE_PASSWORD -ErrorAction SilentlyContinue
 
 当前脚本会验证：
 
-- `/api/wa/health`
+- `/api/wa/health`；桌面连接测试也支持在该路径不可用时回退到 `/healthz`
 - `/api/wa/accounts`
 - `/api/wa/long-connections`
 - 如果线上存在账号，会继续验证 client profiles、OTP 历史、联系人、消息列表。

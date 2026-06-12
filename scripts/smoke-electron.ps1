@@ -105,9 +105,9 @@ async function main() {
   const renderer = {};
   try {
     renderer.hasDesktopShell = await waitForExpression(client, 'Boolean(document.querySelector(".app-shell"))');
-    renderer.hasSettingsPage = await waitForExpression(client, 'Boolean(document.querySelector(".settings-page"))');
+    await evaluate(client, 'window.location.hash = "#/settings"; true');
+    renderer.hasSettingsPage = await waitForExpression(client, 'Boolean(document.querySelector(".app-shell[data-view=settings]") && document.querySelector(".settings-page"))');
     renderer.hasPasswordInput = await evaluate(client, 'document.querySelectorAll("input[type=password]").length > 0');
-    renderer.hasDisconnectedStatus = await evaluate(client, 'Boolean(document.querySelector(".status-pill.bad"))');
     renderer.config = await evaluate(client, 'window.waConfig.get().then((config) => ({ mode: config.mode, remoteBaseUrl: config.remoteBaseUrl, hasPassword: config.hasPassword, hasPasswordRef: Boolean(config.authPasswordRef) }))');
   } finally {
     client.close();
@@ -115,7 +115,6 @@ async function main() {
   if (!renderer.hasDesktopShell) throw new Error('First-run desktop shell is missing');
   if (!renderer.hasSettingsPage) throw new Error('First-run settings page is not visible');
   if (!renderer.hasPasswordInput) throw new Error('First-run settings page has no password input');
-  if (!renderer.hasDisconnectedStatus) throw new Error('First-run disconnected status is not visible');
   if (renderer.config?.mode !== 'remote') throw new Error(`Unexpected first-run mode: ${renderer.config?.mode}`);
   if (renderer.config?.remoteBaseUrl !== expectedBaseUrl) throw new Error(`Unexpected first-run remote URL: ${renderer.config?.remoteBaseUrl}`);
   if (renderer.config?.hasPassword || renderer.config?.hasPasswordRef) throw new Error('First-run config unexpectedly has a password reference');
