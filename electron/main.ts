@@ -4,31 +4,17 @@ import { createServer } from 'node:net';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-type ClientMode = 'remote' | 'local';
-
-type ClientConfig = {
-  mode: ClientMode;
-  remoteBaseUrl: string;
-  localBaseUrl: string;
-  localDataDir: string;
-  autoStartLocalService: boolean;
-  hasPassword: boolean;
-  authPasswordRef: string;
-};
-
-type WindowState = {
-  width: number;
-  height: number;
-  x?: number;
-  y?: number;
-  maximized?: boolean;
-};
-
-type StoredConfig = Omit<ClientConfig, 'hasPassword' | 'authPasswordRef'> & {
-  encryptedPassword?: string;
-  windowState?: WindowState;
-};
+import {
+  defaultConfig,
+  getPassword as decodePassword,
+  normalizeConfig as normalizeStoredConfig,
+  normalizeWindowState,
+  parseTestConfig,
+  publicConfig as toPublicConfig,
+  setPassword as applyPassword,
+  type ClientConfig,
+  type StoredConfig,
+} from './config.js';
 
 type ApiRequestInput = {
   path: string;
@@ -38,7 +24,6 @@ type ApiRequestInput = {
   timeoutMs?: number;
 };
 
-const defaultRemoteBaseUrl = 'https://wa.yizhimeng.uk';
 const userDataDirOverride = process.env.WA_APP_ELECTRON_USER_DATA_DIR?.trim();
 if (userDataDirOverride) app.setPath('userData', userDataDirOverride);
 let mainWindow: BrowserWindow | null = null;
@@ -50,72 +35,27 @@ function configPath() {
   return join(app.getPath('userData'), 'config.json');
 }
 
-function defaultConfig(): StoredConfig {
-  return {
-    mode: 'remote',
-    remoteBaseUrl: defaultRemoteBaseUrl,
-    localBaseUrl: '',
-    localDataDir: join(app.getPath('userData'), 'wa-app-data'),
-    autoStartLocalService: false,
-    windowState: { width: 1320, height: 860 },
-  };
-}
-
 function testConfigFromEnv(): (Partial<ClientConfig> & { password?: string }) | null {
-  const raw = process.env.WA_APP_ELECTRON_TEST_CONFIG;
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as Partial<ClientConfig> & { password?: string };
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch {
-    return null;
-  }
+  return parseTestConfig(process.env.WA_APP_ELECTRON_TEST_CONFIG);
 }
 
 function readConfig(): StoredConfig {
   try {
     const path = configPath();
-    if (!existsSync(path)) return defaultConfig();
+    if (!existsSync(path)) return defaultConfig(app.getPath('userData'));
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<StoredConfig>;
-    return normalizeConfig({ ...defaultConfig(), ...parsed });
+    return normalizeConfig({ ...defaultConfig(app.getPath('userData')), ...parsed });
   } catch {
-    return defaultConfig();
+    return defaultConfig(app.getPath('userData'));
   }
 }
 
 function normalizeConfig(config: StoredConfig): StoredConfig {
-  const remoteBaseUrl = normalizeBaseUrl(config.remoteBaseUrl) || defaultRemoteBaseUrl;
-  const localBaseUrl = normalizeBaseUrl(config.localBaseUrl) || '';
-  return {
-    mode: config.mode === 'local' ? 'local' : 'remote',
-    remoteBaseUrl,
-    localBaseUrl,
-    localDataDir: config.localDataDir || join(app.getPath('userData'), 'wa-app-data'),
-    autoStartLocalService: Boolean(config.autoStartLocalService),
-    encryptedPassword: config.encryptedPassword,
-    windowState: normalizeWindowState(config.windowState),
-  };
-}
-
-function normalizeWindowState(value?: Partial<WindowState>): WindowState {
-  return {
-    width: boundedNumber(value?.width, 1060, 2400, 1320),
-    height: boundedNumber(value?.height, 680, 1800, 860),
-    x: typeof value?.x === 'number' ? value.x : undefined,
-    y: typeof value?.y === 'number' ? value.y : undefined,
-    maximized: Boolean(value?.maximized),
-  };
-}
-
-function boundedNumber(value: unknown, min: number, max: number, fallback: number) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(max, Math.max(min, Math.round(parsed)));
+  return normalizeStoredConfig(config, app.getPath('userData'));
 }
 
 function publicConfig(config = readConfig()): ClientConfig {
-  const hasPassword = Boolean(config.encryptedPassword);
-  return { ...config, hasPassword, authPasswordRef: hasPassword ? 'electron-safe-storage:wa-app-auth-password' : '' };
+  return toPublicConfig(config);
 }
 
 function writeConfig(next: StoredConfig) {
@@ -124,40 +64,12 @@ function writeConfig(next: StoredConfig) {
   writeFileSync(path, JSON.stringify(normalizeConfig(next), null, 2), 'utf8');
 }
 
-function normalizeBaseUrl(value: string) {
-  try {
-    const url = new URL(value.trim());
-    url.pathname = url.pathname.replace(/\/+$/, '');
-    url.search = '';
-    url.hash = '';
-    return url.toString().replace(/\/$/, '');
-  } catch {
-    return '';
-  }
-}
-
 function setPassword(config: StoredConfig, password?: string) {
-  if (password === undefined) return config;
-  const trimmed = password.trim();
-  if (!trimmed) {
-    const rest = { ...config };
-    delete rest.encryptedPassword;
-    return rest;
-  }
-  const encoded = safeStorage.isEncryptionAvailable()
-    ? safeStorage.encryptString(trimmed).toString('base64')
-    : Buffer.from(trimmed, 'utf8').toString('base64');
-  return { ...config, encryptedPassword: encoded };
+  return applyPassword(config, password, safeStorage);
 }
 
 function getPassword(config = readConfig()) {
-  if (!config.encryptedPassword) return '';
-  try {
-    const value = Buffer.from(config.encryptedPassword, 'base64');
-    return safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(value) : value.toString('utf8');
-  } catch {
-    return '';
-  }
+  return decodePassword(config, safeStorage);
 }
 
 function activeBaseUrl(config = readConfig()) {
