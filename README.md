@@ -64,6 +64,7 @@ npx electron-builder --dir
 ```powershell
 $env:WA_APP_ELECTRON_SMOKE_PASSWORD = "<访问密码>"
 npm run smoke:electron
+npm run smoke:mock-ui
 Remove-Item Env:\WA_APP_ELECTRON_SMOKE_PASSWORD -ErrorAction SilentlyContinue
 ```
 
@@ -76,6 +77,8 @@ Remove-Item Env:\WA_APP_ELECTRON_SMOKE_PASSWORD -ErrorAction SilentlyContinue
 - 密码只在本机配置中保存为加密字段，不出现明文。
 - renderer 内部调用 `window.waConfig.testConnection()` 能通过远程健康检查。
 - DevTools 没有在生产窗口中打开。
+
+`npm run smoke:mock-ui` 会启动一个本地 mock `/api/wa/...` 服务，并用打包后的 Electron 连接它，验证有账号数据时账号栏、联系人列表、聊天线程、账号详情、OTP、长连接和设置页都能渲染。这个测试不依赖线上账号数量。
 
 ## 打包
 
