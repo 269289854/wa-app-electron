@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { HashRouter, Navigate, Route, Routes, useNavigate, useParams } from 'react-router';
-import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import {
   AtSign,
   Check,
@@ -62,6 +61,7 @@ import {
   timestampValue,
   type PhoneInput,
 } from './api';
+import { normalizePhoneInput } from './phone-input';
 import { probeStatus, registrationMethods, statusReason } from './result-model';
 import type { AccountMessage, ClientProfile, WAAccount, WorkflowResponse } from './types';
 
@@ -1194,30 +1194,6 @@ function InlineLoading({ text }: { text: string }) {
 
 function resolvePhoneInput(phone: string, countryCallingCode: string): PhoneInput | null {
   return normalizePhoneInput(phone, countryCallingCode);
-}
-
-function normalizePhoneInput(phone: string, countryCallingCode: string): PhoneInput | null {
-  const raw = phone.trim();
-  const digits = phone.replace(/\D+/g, '');
-  const callingCode = countryCallingCode.replace(/\D+/g, '');
-  if (!digits) return null;
-  const candidates = [
-    raw.startsWith('+') ? raw : `+${digits}`,
-    callingCode ? `+${digits.startsWith(callingCode) ? digits : `${callingCode}${digits}`}` : '',
-  ].filter(Boolean);
-  for (const candidate of candidates) {
-    const parsed = parsePhoneNumberFromString(candidate);
-    if (!parsed?.country || !parsed.countryCallingCode || !parsed.nationalNumber || !parsed.isPossible()) continue;
-    if (callingCode && parsed.countryCallingCode !== callingCode && !digits.startsWith(parsed.countryCallingCode)) continue;
-    return {
-      region: parsed.country,
-      phone: parsed.nationalNumber,
-      e164_number: parsed.number,
-      country_calling_code: parsed.countryCallingCode,
-      country_iso2: parsed.country,
-    };
-  }
-  return null;
 }
 
 function requirePhone(input: PhoneInput | null) {
