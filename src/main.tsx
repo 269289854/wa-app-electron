@@ -811,6 +811,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
     const config = configQuery.data?.smsbower || (await window.waConfig.get()).smsbower;
     if (!config.configured) throw new Error('SMSBower is not configured');
     stopPlatformRef.current = false;
+    setDebugExchanges([]);
     setPlatformState({
       running: true,
       stopping: false,
@@ -1211,7 +1212,7 @@ function replaceDebugExchange(items: DebugExchange[], target: DebugExchange, nex
 }
 
 function appendDebugExchange(setDebugExchanges: React.Dispatch<React.SetStateAction<DebugExchange[]>>, exchange: DebugExchange) {
-  setDebugExchanges((items) => [...items, exchange]);
+  setDebugExchanges((items) => [exchange, ...items]);
 }
 
 function patchDebugExchange(setDebugExchanges: React.Dispatch<React.SetStateAction<DebugExchange[]>>, target: DebugExchange, next: DebugExchange) {
