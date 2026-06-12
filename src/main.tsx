@@ -1272,7 +1272,12 @@ function formatDate(date: Date | null, withTime = false) {
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  if (normalized.includes('reason=blocked') || normalized.includes('number is blocked')) return '号码被 WhatsApp 拒绝或封禁，当前协议链路无法发起验证码。';
+  if (normalized.includes('too_recent') || normalized.includes('too_many') || normalized.includes('cooling down') || normalized.includes('rate_limited')) return '请求过于频繁，正在冷却中，请稍后再试。';
+  if (normalized.includes('no_routes') || normalized.includes('route_unavailable')) return '暂无可用验证码通道，请换 SMS/语音或稍后再试。';
+  return message;
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
