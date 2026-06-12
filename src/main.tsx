@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { HashRouter, Navigate, Route, Routes, useNavigate, useParams } from 'react-router';
+import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import {
   AtSign,
   Check,
@@ -770,52 +771,60 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
   const [countryCallingCode, setCountryCallingCode] = useState('');
   const [phone, setPhone] = useState('');
   const [probe, setProbe] = useState<WorkflowResponse | null>(null);
-  const [debugExchange, setDebugExchange] = useState<DebugExchange | null>(null);
+  const [debugExchanges, setDebugExchanges] = useState<DebugExchange[]>([]);
+  const [addAccountStage, setAddAccountStage] = useState<'idle' | 'probe' | 'register'>('idle');
   const [method, setMethod] = useState('sms');
   const [pendingAccountID, setPendingAccountID] = useState('');
   const [otp, setOtp] = useState('');
   const input = resolvePhoneInput(phone, countryCallingCode);
+  const recognizedPhone = input?.country_iso2 ? `${input.country_iso2} +${input.country_calling_code}` : '';
   const status = probeStatus(probe);
-  const probeMutation = useMutation({
-    mutationFn: async () => {
-      const body = requirePhone(input);
-      const exchange = debugRequest('探测号码', '/api/wa/phone/sms-probe', body);
-      try {
-        const response = await probePhoneSMS(body);
-        setDebugExchange({ ...exchange, response: sanitizeDebugValue(response) });
-        return response;
-      } catch (error) {
-        setDebugExchange({ ...exchange, error: debugError(error) });
-        throw error;
-      }
-    },
-    onSuccess: (result) => {
-      setProbe(result);
-      notify('success', '号码探测完成');
-    },
-    onError: (error) => notify('error', errorMessage(error)),
-  });
-  const registerMutation = useMutation({
+  const updatePhoneInput = (value: string) => {
+    setPhone(value);
+    const normalized = normalizePhoneInput(value, countryCallingCode);
+    if (!normalized) return;
+    setCountryCallingCode(normalized.country_calling_code);
+    setPhone(normalized.phone);
+  };
+  const probeAndRegisterMutation = useMutation({
     mutationFn: async () => {
       const phoneInput = requirePhone(input);
-      const body = { ...phoneInput, delivery_method: method };
-      const exchange = debugRequest('发起注册', '/api/wa/register', body);
+      const probeExchange = debugRequest('探测号码', '/api/wa/phone/sms-probe', phoneInput);
+      setAddAccountStage('probe');
+      setDebugExchanges([probeExchange]);
+      let probeResponse: WorkflowResponse;
       try {
-        const response = await registerPhone(phoneInput, method);
-        setDebugExchange({ ...exchange, response: sanitizeDebugValue(response) });
-        return response;
+        probeResponse = await probePhoneSMS(phoneInput);
+        setDebugExchanges([{ ...probeExchange, response: sanitizeDebugValue(probeResponse) }]);
       } catch (error) {
-        setDebugExchange({ ...exchange, error: debugError(error) });
+        setDebugExchanges([{ ...probeExchange, error: debugError(error) }]);
+        throw error;
+      }
+      const probeResultStatus = probeStatus(probeResponse);
+      if (!probeResultStatus.canRegister) {
+        throw new Error(statusReason(probeResultStatus) || '探测未通过，未发起注册。');
+      }
+      const registerBody = { ...phoneInput, delivery_method: method };
+      const registerExchange = debugRequest('发起注册', '/api/wa/register', registerBody);
+      setAddAccountStage('register');
+      setDebugExchanges((items) => [...items, registerExchange]);
+      try {
+        const registerResponse = await registerPhone(phoneInput, method);
+        setDebugExchanges((items) => replaceDebugExchange(items, registerExchange, { ...registerExchange, response: sanitizeDebugValue(registerResponse) }));
+        return { registerResponse };
+      } catch (error) {
+        setDebugExchanges((items) => replaceDebugExchange(items, registerExchange, { ...registerExchange, error: debugError(error) }));
         throw error;
       }
     },
-    onSuccess: (result) => {
-      setProbe(result);
-      if (result.wa_account_id) setPendingAccountID(result.wa_account_id);
-      notify(result.success === false || result.error_message ? 'error' : 'success', result.error_message || '注册请求已提交');
+    onSuccess: ({ registerResponse }) => {
+      setProbe(registerResponse);
+      if (registerResponse.wa_account_id) setPendingAccountID(registerResponse.wa_account_id);
+      notify(registerResponse.success === false || registerResponse.error_message ? 'error' : 'success', registerResponse.error_message || '注册请求已提交');
       onChanged();
     },
     onError: (error) => notify('error', errorMessage(error)),
+    onSettled: () => setAddAccountStage('idle'),
   });
   const otpMutation = useMutation({
     mutationFn: async () => {
@@ -823,10 +832,10 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
       const exchange = debugRequest('提交 OTP', '/api/wa/actions/registration/resume-otp', body);
       try {
         const response = await submitRegistrationOTP(pendingAccountID, otp);
-        setDebugExchange({ ...exchange, response: sanitizeDebugValue(response) });
+        setDebugExchanges([{ ...exchange, response: sanitizeDebugValue(response) }]);
         return response;
       } catch (error) {
-        setDebugExchange({ ...exchange, error: debugError(error) });
+        setDebugExchanges([{ ...exchange, error: debugError(error) }]);
         throw error;
       }
     },
@@ -837,7 +846,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
     },
     onError: (error) => notify('error', errorMessage(error)),
   });
-  const addAccountBusy = probeMutation.isPending || registerMutation.isPending || otpMutation.isPending;
+  const addAccountBusy = probeAndRegisterMutation.isPending || otpMutation.isPending;
   return (
     <section className="add-page">
       <div className="section-title">
@@ -853,8 +862,9 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
             </label>
             <label>
               手机号
-              <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="4155550123" disabled={addAccountBusy} />
+              <input value={phone} onChange={(event) => updatePhoneInput(event.target.value)} placeholder="4155550123" disabled={addAccountBusy} />
             </label>
+            {recognizedPhone ? <span className="field-hint">已识别：{recognizedPhone}</span> : null}
             <label>
               注册通道
               <select value={method} onChange={(event) => setMethod(event.target.value)} disabled={addAccountBusy}>
@@ -876,13 +886,9 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
               </div>
             ) : null}
             <div className="inline-actions">
-              <button className="secondary-button" disabled={addAccountBusy} onClick={() => probeMutation.mutate()}>
-                {probeMutation.isPending ? <Loader2 className="spin" size={15} /> : <Search size={15} />}
-                探测号码
-              </button>
-              <button className="primary-button" disabled={addAccountBusy || Boolean(probe && !status.canRegister)} onClick={() => registerMutation.mutate()}>
-                {registerMutation.isPending ? <Loader2 className="spin" size={15} /> : <Send size={15} />}
-                发起注册
+              <button className="primary-button" disabled={addAccountBusy} onClick={() => probeAndRegisterMutation.mutate()}>
+                {probeAndRegisterMutation.isPending ? <Loader2 className="spin" size={15} /> : <Send size={15} />}
+                {addAccountStage === 'probe' ? '探测中...' : addAccountStage === 'register' ? '注册请求中...' : '探测并发起注册'}
               </button>
             </div>
           </div>
@@ -905,7 +911,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
         </InfoCard>
       </div>
       <InfoCard title="结果" icon={<MonitorCog size={17} />}>
-        <pre className="json-box debug-json">{JSON.stringify(debugExchange || { hint: '点击“探测号码”或“发起注册”后，这里会显示请求和应答。' }, null, 2)}</pre>
+        <pre className="json-box debug-json">{JSON.stringify(debugExchanges.length ? debugExchanges : [{ hint: '点击“探测并发起注册”后，这里会显示请求和应答链路。' }], null, 2)}</pre>
       </InfoCard>
     </section>
   );
@@ -943,6 +949,10 @@ function debugError(error: unknown) {
     name: error instanceof Error ? error.name : typeof error,
     message: error instanceof Error ? error.message : String(error),
   };
+}
+
+function replaceDebugExchange(items: DebugExchange[], target: DebugExchange, next: DebugExchange) {
+  return items.map((item) => item === target || (item.label === target.label && item.at === target.at) ? next : item);
 }
 
 function sanitizeDebugValue(value: unknown): unknown {
@@ -1183,11 +1193,31 @@ function InlineLoading({ text }: { text: string }) {
 }
 
 function resolvePhoneInput(phone: string, countryCallingCode: string): PhoneInput | null {
-  const cc = countryCallingCode.replace(/\D+/g, '');
+  return normalizePhoneInput(phone, countryCallingCode);
+}
+
+function normalizePhoneInput(phone: string, countryCallingCode: string): PhoneInput | null {
+  const raw = phone.trim();
   const digits = phone.replace(/\D+/g, '');
-  if (!cc || !digits) return null;
-  const e164 = digits.startsWith(cc) ? `+${digits}` : `+${cc}${digits}`;
-  return { region: '', phone: digits, e164_number: e164, country_calling_code: cc, country_iso2: '' };
+  const callingCode = countryCallingCode.replace(/\D+/g, '');
+  if (!digits) return null;
+  const candidates = [
+    raw.startsWith('+') ? raw : `+${digits}`,
+    callingCode ? `+${digits.startsWith(callingCode) ? digits : `${callingCode}${digits}`}` : '',
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    const parsed = parsePhoneNumberFromString(candidate);
+    if (!parsed?.country || !parsed.countryCallingCode || !parsed.nationalNumber || !parsed.isPossible()) continue;
+    if (callingCode && parsed.countryCallingCode !== callingCode && !digits.startsWith(parsed.countryCallingCode)) continue;
+    return {
+      region: parsed.country,
+      phone: parsed.nationalNumber,
+      e164_number: parsed.number,
+      country_calling_code: parsed.countryCallingCode,
+      country_iso2: parsed.country,
+    };
+  }
+  return null;
 }
 
 function requirePhone(input: PhoneInput | null) {
