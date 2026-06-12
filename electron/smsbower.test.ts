@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizePrices, parseNumberResponse, parseStatusResponse } from './smsbower.js';
+import { SMSBowerClient, normalizePrices, parseNumberResponse, parseStatusResponse } from './smsbower.js';
 
 describe('SMSBower helpers', () => {
   it('parses ACCESS_NUMBER responses', () => {
@@ -46,5 +46,24 @@ describe('SMSBower helpers', () => {
     expect(normalizePrices({ 33: { wa: { price: '0.39', stock: '2' } } }, '33', 'wa')).toEqual([
       { country: '33', service: 'wa', cost: 0.39, count: 2 },
     ]);
+  });
+
+  it('sends setStatus requests with the requested activation id and status', async () => {
+    let requestedUrl = '';
+    const client = new SMSBowerClient({
+      apiKey: 'secret',
+      fetcher: (async (url) => {
+        requestedUrl = String(url);
+        return new Response('ACCESS_CANCEL');
+      }) as typeof fetch,
+    });
+
+    await expect(client.setStatus('12345', 8)).resolves.toBe('ACCESS_CANCEL');
+
+    const url = new URL(requestedUrl);
+    expect(url.searchParams.get('action')).toBe('setStatus');
+    expect(url.searchParams.get('id')).toBe('12345');
+    expect(url.searchParams.get('status')).toBe('8');
+    expect(url.searchParams.get('api_key')).toBe('secret');
   });
 });

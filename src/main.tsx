@@ -63,6 +63,7 @@ import {
 } from './api';
 import { normalizePhoneInput } from './phone-input';
 import { probeStatus, registrationMethods, statusReason } from './result-model';
+import { cancelSMSBowerActivation, type SMSBowerCancelLogEntry } from './smsbower-cancel';
 import { countryDisplayName, filterSMSBowerCountries, normalizeSMSBowerCountries, type SMSBowerCountry } from './smsbower-countries';
 import type { AccountMessage, ClientProfile, WAAccount, WorkflowResponse } from './types';
 
@@ -857,53 +858,79 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
         throw error;
       }
 
-      const normalized = normalizePhoneInput(number.phone, '');
-      setPlatformState((state) => ({ ...state, stage: 'probe', currentPhone: number.phone, activationId: number.activationId, message: 'Probing WA registration route' }));
-      if (!normalized) {
-        appendDebugExchange(setDebugExchanges, debugInfo('SMSBower invalid number', number));
-        continue;
-      }
-      setCountryCallingCode(normalized.country_calling_code);
-      setPhone(normalized.phone);
-
-      const registration = await probeAndRegisterForSMSBower(normalized, setAddAccountStage, setDebugExchanges, setProbe);
-      if (!registration.ok) {
-        appendDebugExchange(setDebugExchanges, debugInfo('SMSBower WA registration skipped', {
-          activationId: number.activationId,
-          reason: registration.reason,
-        }));
-        continue;
-      }
-      const waAccountId = registration.response.wa_account_id || '';
-      if (!waAccountId) {
-        appendDebugExchange(setDebugExchanges, debugInfo('SMSBower missing wa_account_id', registration.response));
-        continue;
-      }
-      setPendingAccountID(waAccountId);
-      setPlatformState((state) => ({ ...state, stage: 'otp', message: 'Waiting for SMSBower OTP code' }));
-      const code = await waitForSMSBowerCode(number.activationId, config, setDebugExchanges, stopPlatformRef);
-      if (!code) continue;
-
-      setPlatformState((state) => ({ ...state, stage: 'submit', message: 'Submitting OTP to wa-app' }));
-      const otpExchange = debugRequest('Submit SMSBower OTP', '/api/wa/actions/registration/resume-otp', { wa_account_id: waAccountId, otp: code });
-      appendDebugExchange(setDebugExchanges, otpExchange);
+      let completed = false;
+      let cancelReason = '';
       try {
-        const otpResponse = await submitRegistrationOTP(waAccountId, code);
-        patchDebugExchange(setDebugExchanges, otpExchange, { ...otpExchange, response: sanitizeDebugValue(otpResponse) });
-        const exists = await confirmAccountAppears(waAccountId);
-        if (!exists) throw new Error(otpResponse.error_message || 'OTP submitted but account was not found in the account list');
-        const doneExchange = debugRequest('SMSBower setStatus complete', 'smsbower:setStatus', { id: number.activationId, status: 6 });
-        appendDebugExchange(setDebugExchanges, doneExchange);
-        const done = await window.smsbower.setStatus({ id: number.activationId, status: 6 });
-        patchDebugExchange(setDebugExchanges, doneExchange, { ...doneExchange, response: sanitizeDebugValue(done) });
-        successes += 1;
-        setPlatformState((state) => ({ ...state, successes, stage: 'number', message: `Success ${successes}/${config.targetSuccessCount}` }));
-        await queryClient.invalidateQueries({ queryKey: ['accounts'] });
-        onChanged();
+        const normalized = normalizePhoneInput(number.phone, '');
+        setPlatformState((state) => ({ ...state, stage: 'probe', currentPhone: number.phone, activationId: number.activationId, message: 'Probing WA registration route' }));
+        if (!normalized) {
+          cancelReason = 'SMSBower returned an invalid phone number';
+          appendDebugExchange(setDebugExchanges, debugInfo('SMSBower invalid number', number));
+          continue;
+        }
+        setCountryCallingCode(normalized.country_calling_code);
+        setPhone(normalized.phone);
+
+        const registration = await probeAndRegisterForSMSBower(normalized, setAddAccountStage, setDebugExchanges, setProbe);
+        if (!registration.ok) {
+          cancelReason = registration.reason || 'WA registration was skipped';
+          appendDebugExchange(setDebugExchanges, debugInfo('SMSBower WA registration skipped', {
+            activationId: number.activationId,
+            reason: cancelReason,
+          }));
+          continue;
+        }
+        const waAccountId = registration.response.wa_account_id || '';
+        if (!waAccountId) {
+          cancelReason = 'WA registration response did not include wa_account_id';
+          appendDebugExchange(setDebugExchanges, debugInfo('SMSBower missing wa_account_id', registration.response));
+          continue;
+        }
+        setPendingAccountID(waAccountId);
+        setPlatformState((state) => ({ ...state, stage: 'otp', message: 'Waiting for SMSBower OTP code' }));
+        const codeResult = await waitForSMSBowerCode(number.activationId, config, setDebugExchanges, stopPlatformRef);
+        if (!codeResult.code) {
+          cancelReason = codeResult.reason;
+          continue;
+        }
+
+        setPlatformState((state) => ({ ...state, stage: 'submit', message: 'Submitting OTP to wa-app' }));
+        const otpExchange = debugRequest('Submit SMSBower OTP', '/api/wa/actions/registration/resume-otp', { wa_account_id: waAccountId, otp: codeResult.code });
+        appendDebugExchange(setDebugExchanges, otpExchange);
+        try {
+          const otpResponse = await submitRegistrationOTP(waAccountId, codeResult.code);
+          patchDebugExchange(setDebugExchanges, otpExchange, { ...otpExchange, response: sanitizeDebugValue(otpResponse) });
+          const exists = await confirmAccountAppears(waAccountId);
+          if (!exists) throw new Error(otpResponse.error_message || 'OTP submitted but account was not found in the account list');
+          completed = true;
+          const doneExchange = debugRequest('SMSBower setStatus complete', 'smsbower:setStatus', { id: number.activationId, status: 6 });
+          appendDebugExchange(setDebugExchanges, doneExchange);
+          try {
+            const done = await window.smsbower.setStatus({ id: number.activationId, status: 6 });
+            patchDebugExchange(setDebugExchanges, doneExchange, { ...doneExchange, response: sanitizeDebugValue(done) });
+          } catch (error) {
+            patchDebugExchange(setDebugExchanges, doneExchange, { ...doneExchange, error: debugError(error) });
+            appendDebugExchange(setDebugExchanges, debugInfo('SMSBower setStatus complete failed', { activationId: number.activationId, error: errorMessage(error) }));
+          }
+          successes += 1;
+          setPlatformState((state) => ({ ...state, successes, stage: 'number', message: `Success ${successes}/${config.targetSuccessCount}` }));
+          await queryClient.invalidateQueries({ queryKey: ['accounts'] });
+          onChanged();
+        } catch (error) {
+          cancelReason = errorMessage(error);
+          patchDebugExchange(setDebugExchanges, otpExchange, { ...otpExchange, error: debugError(error) });
+          appendDebugExchange(setDebugExchanges, debugInfo('SMSBower OTP submit failed', { activationId: number.activationId, error: cancelReason }));
+        }
       } catch (error) {
-        patchDebugExchange(setDebugExchanges, otpExchange, { ...otpExchange, error: debugError(error) });
-        appendDebugExchange(setDebugExchanges, debugInfo('SMSBower OTP submit failed', { activationId: number.activationId, error: errorMessage(error) }));
+        cancelReason = errorMessage(error);
+        appendDebugExchange(setDebugExchanges, debugInfo('SMSBower order failed', { activationId: number.activationId, error: cancelReason }));
+      } finally {
+        if (!completed && cancelReason) {
+          setPlatformState((state) => ({ ...state, message: `Cancelling SMSBower order ${number.activationId}` }));
+          await cancelSMSBowerOrder(number.activationId, cancelReason, setDebugExchanges);
+        }
       }
+      if (stopPlatformRef.current) break;
     }
     return { successes, orders, stopped: stopPlatformRef.current };
   };
@@ -1257,6 +1284,31 @@ function smsbowerPriceErrorMessage(prices: SMSBowerPrice[], config: SMSBowerPubl
   return `SMSBower 没有符合 ${config.minPrice}-${config.maxPrice} 的 WhatsApp 号码，请调整价格范围或更换国家。可用价格：${summary}`;
 }
 
+async function cancelSMSBowerOrder(
+  activationId: string,
+  reason: string,
+  setDebugExchanges: React.Dispatch<React.SetStateAction<DebugExchange[]>>,
+) {
+  return cancelSMSBowerActivation(
+    activationId,
+    reason,
+    (input) => window.smsbower.setStatus(input),
+    (entry) => appendDebugExchange(setDebugExchanges, smsbowerCancelExchange(entry)),
+  );
+}
+
+function smsbowerCancelExchange(entry: SMSBowerCancelLogEntry): DebugExchange {
+  const exchange = debugRequest('SMSBower setStatus cancel', 'smsbower:setStatus', {
+    id: entry.id,
+    status: entry.status,
+    reason: entry.reason,
+    attempt: entry.attempt,
+  });
+  if (entry.response !== undefined) return { ...exchange, response: sanitizeDebugValue(entry.response) };
+  if (entry.error !== undefined) return { ...exchange, error: debugError(entry.error) };
+  return exchange;
+}
+
 async function waitForSMSBowerCode(
   activationId: string,
   config: SMSBowerPublicConfig,
@@ -1266,31 +1318,24 @@ async function waitForSMSBowerCode(
   const started = Date.now();
   const timeoutMs = config.otpTimeoutSeconds * 1000;
   const intervalMs = config.pollIntervalSeconds * 1000;
-  while (Date.now() - started < timeoutMs && !stopRef.current) {
+  while (Date.now() - started < timeoutMs) {
+    if (stopRef.current) return { code: '', reason: 'SMSBower task was stopped by user' };
     await delay(intervalMs);
+    if (stopRef.current) return { code: '', reason: 'SMSBower task was stopped by user' };
     const statusExchange = debugRequest('SMSBower getStatus', 'smsbower:getStatus', { id: activationId });
     appendDebugExchange(setDebugExchanges, statusExchange);
     try {
       const status = await window.smsbower.getStatus(activationId);
       patchDebugExchange(setDebugExchanges, statusExchange, { ...statusExchange, response: sanitizeDebugValue(status) });
-      if (status.status === 'ok' && status.code) return status.code;
-      if (status.status === 'cancelled' || status.status === 'error') return '';
+      if (status.status === 'ok' && status.code) return { code: status.code, reason: '' };
+      if (status.status === 'cancelled') return { code: '', reason: 'SMSBower activation was already cancelled' };
+      if (status.status === 'error') return { code: '', reason: status.error || status.raw || 'SMSBower status returned an error' };
     } catch (error) {
       patchDebugExchange(setDebugExchanges, statusExchange, { ...statusExchange, error: debugError(error) });
-      return '';
+      return { code: '', reason: errorMessage(error) };
     }
   }
-  if (!stopRef.current) {
-    const cancelExchange = debugRequest('SMSBower setStatus cancel', 'smsbower:setStatus', { id: activationId, status: 8 });
-    appendDebugExchange(setDebugExchanges, cancelExchange);
-    try {
-      const response = await window.smsbower.setStatus({ id: activationId, status: 8 });
-      patchDebugExchange(setDebugExchanges, cancelExchange, { ...cancelExchange, response: sanitizeDebugValue(response) });
-    } catch (error) {
-      patchDebugExchange(setDebugExchanges, cancelExchange, { ...cancelExchange, error: debugError(error) });
-    }
-  }
-  return '';
+  return { code: '', reason: 'SMSBower OTP timed out' };
 }
 
 async function confirmAccountAppears(accountId: string) {
