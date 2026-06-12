@@ -12,6 +12,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit",
     "build": "npm run typecheck && vite build && tsc -p electron/tsconfig.json",
+    "smoke:electron": "powershell -ExecutionPolicy Bypass -File scripts/smoke-electron.ps1",
     "dist": "npm run build && electron-builder",
     "start": "npm run build && electron ."
   },

@@ -39,6 +39,8 @@ type ApiRequestInput = {
 };
 
 const defaultRemoteBaseUrl = 'https://wa.yizhimeng.uk';
+const userDataDirOverride = process.env.WA_APP_ELECTRON_USER_DATA_DIR?.trim();
+if (userDataDirOverride) app.setPath('userData', userDataDirOverride);
 let mainWindow: BrowserWindow | null = null;
 let localProcess: ChildProcessWithoutNullStreams | null = null;
 let localPort = 0;
@@ -57,6 +59,17 @@ function defaultConfig(): StoredConfig {
     autoStartLocalService: false,
     windowState: { width: 1320, height: 860 },
   };
+}
+
+function testConfigFromEnv(): (Partial<ClientConfig> & { password?: string }) | null {
+  const raw = process.env.WA_APP_ELECTRON_TEST_CONFIG;
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<ClientConfig> & { password?: string };
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function readConfig(): StoredConfig {
@@ -330,6 +343,11 @@ function saveWindowState(window: BrowserWindow | null) {
 }
 
 app.whenReady().then(async () => {
+  const testConfig = testConfigFromEnv();
+  if (testConfig) {
+    const next = normalizeConfig(setPassword({ ...readConfig(), ...testConfig }, testConfig.password));
+    writeConfig(next);
+  }
   const config = readConfig();
   if (config.mode === 'local' && config.autoStartLocalService) await startLocalService();
   ipcMain.handle('wa-config:get', () => publicConfig());
