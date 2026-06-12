@@ -34,11 +34,24 @@ const text = (res, value) => {
 
 const accountID = 'wa-account-1';
 const contactID = 'contact-1';
+const operations = [];
 
-const server = http.createServer((req, res) => {
+function readBody(req) {
+  return new Promise((resolve) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', (chunk) => body += chunk);
+    req.on('end', () => {
+      try { resolve(body ? JSON.parse(body) : {}); } catch { resolve({ raw: body }); }
+    });
+  });
+}
+
+const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', 'http://127.0.0.1');
   const path = url.pathname;
   if (path === '/api/wa/health') return json(res, { ok: true, service: 'mock-wa-app' });
+  if (path === '/__operations') return json(res, { operations });
   if (path === '/api/wa/accounts') return json(res, {
     accounts: [{
       wa_account_id: accountID,
@@ -79,7 +92,21 @@ const server = http.createServer((req, res) => {
     status: { configured: true, email_configured: true, email_verified: true, email_address: 'mock@example.com' },
   });
   if (path.includes('/profile-picture')) return text(res, '');
-  if (req.method === 'POST' || req.method === 'DELETE') return json(res, { success: true, operation: { status: 'ok' } });
+  if (req.method === 'POST' || req.method === 'DELETE') {
+    const body = await readBody(req);
+    operations.push({ method: req.method, path, body });
+    if (path === '/api/wa/phone/sms-probe') return json(res, {
+      success: true,
+      passed: true,
+      status: 'ok',
+      method_statuses: [{ method: 'sms', available: true }],
+      phone_status: { sms_available: true },
+    });
+    if (path === '/api/wa/register') return json(res, { success: true, status: 'otp_required', wa_account_id: accountID, delivery_method: body.delivery_method || 'sms' });
+    if (path === '/api/wa/actions/registration/resume-otp') return json(res, { success: true, status: 'registered', wa_account_id: body.wa_account_id || accountID });
+    if (path === '/api/wa/messages/send') return json(res, { success: true, message_id: 'msg-sent' });
+    return json(res, { success: true, operation: { status: 'ok' } });
+  }
   res.writeHead(404, { 'content-type': 'application/json' });
   res.end(JSON.stringify({ error: { message: `Unhandled mock path ${req.method} ${path}` } }));
 });
@@ -149,7 +176,7 @@ function connectDebugger(webSocketUrl) {
   });
 }
 
-async function evaluate(client, expression, timeoutMs = 15000) {
+async function evaluate(client, expression, timeoutMs = 30000) {
   const result = await client.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, timeout: timeoutMs }, timeoutMs + 2000);
   if (result.exceptionDetails) throw new Error(result.exceptionDetails.text || 'Runtime evaluation failed');
   return result.result ? result.result.value : undefined;
@@ -172,6 +199,32 @@ async function route(client, hash, expression, timeoutMs = 15000) {
   if (!ok) throw new Error(`Route ${hash} did not render expected content`);
 }
 
+async function waitForOperation(path, method = 'POST', timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const operations = await new Promise((resolve, reject) => {
+      const req = http.get(`${expectedBaseUrl}/__operations`, (res) => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => body += chunk);
+        res.on('end', () => {
+          try { resolve(JSON.parse(body).operations || []); } catch (error) { reject(error); }
+        });
+      });
+      req.on('error', reject);
+      req.setTimeout(5000, () => req.destroy(new Error('operation poll timeout')));
+    });
+    const match = operations.find((operation) => operation.path === path && operation.method === method);
+    if (match) return match;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`Operation ${method} ${path} was not recorded`);
+}
+
+async function runInPage(client, source, timeoutMs = 30000) {
+  return evaluate(client, `(async () => { ${source} })()`, timeoutMs);
+}
+
 async function main() {
   const tabs = await getJson('/json');
   const page = tabs.find((item) => item.type === 'page' && item.title === 'WA App') || tabs.find((item) => item.type === 'page');
@@ -184,8 +237,139 @@ async function main() {
     if (checks.config.remoteBaseUrl !== expectedBaseUrl || !checks.config.hasPassword) throw new Error('Mock config was not applied');
     checks.accountRail = await waitForExpression(client, 'document.body.innerText.includes("Mock Account")');
     checks.chatThread = await waitForExpression(client, 'document.body.innerText.includes("Mock Contact") && document.body.innerText.includes("Mock hello") && document.body.innerText.includes("Mock reply")');
+    await runInPage(client, `
+      const setValue = (input, value) => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      const input = document.querySelector('.composer input');
+      const button = document.querySelector('.composer button');
+      setValue(input, 'Smoke send message');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      button.click();
+      return true;
+    `);
+    const sentMessage = await waitForOperation('/api/wa/messages/send');
+    if (sentMessage.body.text !== 'Smoke send message') throw new Error('Send message payload was not recorded');
+    checks.sendMessage = true;
     await route(client, '#/account', 'document.body.innerText.includes("Mock Account") && document.body.innerText.includes("profile-1") && document.body.innerText.includes("123456") && document.body.innerText.includes("connected")');
+    await runInPage(client, `
+      const setValue = (input, value) => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      const textInputs = [...document.querySelectorAll('input:not([type]), input[type="text"]')];
+      const displayName = textInputs.find((input) => input.value === 'Mock Account');
+      if (!displayName) throw new Error('Display name input not found');
+      setValue(displayName, 'Mock Renamed');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      displayName.closest('.form-grid').querySelector('.primary-button')?.click();
+      return true;
+    `);
+    await waitForOperation('/api/wa/account-settings/profile/name');
+    await runInPage(client, `
+      const setValue = (input, value) => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      const passwordInputs = [...document.querySelectorAll('input[type="password"]')].filter((input) => input.offsetParent !== null);
+      const pin = passwordInputs.find((input) => input.closest('.form-grid.two'));
+      if (!pin) throw new Error('PIN input not found');
+      setValue(pin, '123456');
+      let button = pin.closest('label')?.nextElementSibling;
+      for (let index = 0; index < 20 && (!button || button.disabled); index += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        button = pin.closest('label')?.nextElementSibling;
+      }
+      if (!button || button.disabled) throw new Error('PIN button is not ready');
+      button.click();
+      return true;
+    `);
+    await waitForOperation('/api/wa/account-settings/2fa');
+    await runInPage(client, `
+      const setValue = (input, value) => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      const email = [...document.querySelectorAll('input[type="email"]')][0];
+      if (!email) throw new Error('Email input not found');
+      setValue(email, 'desktop-smoke@example.com');
+      let button = email.closest('label')?.nextElementSibling;
+      for (let index = 0; index < 20 && (!button || button.disabled); index += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        button = email.closest('label')?.nextElementSibling;
+      }
+      if (!button || button.disabled) throw new Error('Email button is not ready');
+      button.click();
+      return true;
+    `);
+    await waitForOperation('/api/wa/account-settings/email');
+    await runInPage(client, `
+      const setValue = (input, value) => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      const passwordInputs = [...document.querySelectorAll('input[type="password"]')];
+      const otp = passwordInputs[1];
+      if (!otp) throw new Error('Email OTP input not found');
+      const actions = otp.closest('.form-grid.two').querySelector('.inline-actions');
+      const buttons = [...actions.querySelectorAll('button')];
+      buttons[0]?.click();
+      setValue(otp, '654321');
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      if (!buttons[1] || buttons[1].disabled) throw new Error('Email OTP verify button is not ready');
+      buttons[1].click();
+      return true;
+    `);
+    await waitForOperation('/api/wa/account-settings/email/otp/request');
+    await waitForOperation('/api/wa/account-settings/email/otp/verify');
     checks.accountPage = true;
+    checks.accountActions = true;
+    await route(client, '#/add', 'Boolean(document.querySelector(".add-page"))');
+    await runInPage(client, `
+      const setValue = (input, value) => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      const inputs = [...document.querySelectorAll('.add-page input')];
+      setValue(inputs[0], '+1');
+      setValue(inputs[1], '5550100003');
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const actions = document.querySelector('.add-page .inline-actions');
+      const buttons = [...actions.querySelectorAll('button')];
+      if (!buttons[0] || buttons[0].disabled) throw new Error('Probe button is not ready');
+      buttons[0].click();
+      return true;
+    `);
+    await waitForOperation('/api/wa/phone/sms-probe');
+    await runInPage(client, `
+      const actions = document.querySelector('.add-page .inline-actions');
+      const buttons = [...actions.querySelectorAll('button')];
+      if (!buttons[1] || buttons[1].disabled) throw new Error('Register button is not ready');
+      buttons[1].click();
+      return true;
+    `);
+    await waitForOperation('/api/wa/register');
+    await runInPage(client, `
+      const setValue = (input, value) => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      const inputs = [...document.querySelectorAll('.add-page input')];
+      const accountID = inputs.find((input) => input.placeholder === 'wa_account_id');
+      const otp = inputs.find((input) => input.type === 'password');
+      if (!accountID || !otp) throw new Error('Registration OTP inputs not found');
+      setValue(accountID, 'wa-account-1');
+      setValue(otp, '111222');
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const buttons = [...document.querySelectorAll('.add-page .primary-button')];
+      const button = buttons[buttons.length - 1];
+      if (!button || button.disabled) throw new Error('Registration OTP button is not ready');
+      button.click();
+      return true;
+    `);
+    await waitForOperation('/api/wa/actions/registration/resume-otp');
+    checks.registrationActions = true;
     await route(client, '#/settings', 'Boolean(document.querySelector(".app-shell[data-view=settings]") && document.querySelector(".settings-page") && document.querySelector("input[type=password]"))');
     checks.settingsPage = true;
   } finally {

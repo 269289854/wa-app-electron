@@ -78,7 +78,7 @@ Remove-Item Env:\WA_APP_ELECTRON_SMOKE_PASSWORD -ErrorAction SilentlyContinue
 - renderer 内部调用 `window.waConfig.testConnection()` 能通过远程健康检查。
 - DevTools 没有在生产窗口中打开。
 
-`npm run smoke:mock-ui` 会启动一个本地 mock `/api/wa/...` 服务，并用打包后的 Electron 连接它，验证有账号数据时账号栏、联系人列表、聊天线程、账号详情、OTP、长连接和设置页都能渲染。这个测试不依赖线上账号数量。
+`npm run smoke:mock-ui` 会启动一个本地 mock `/api/wa/...` 服务，并用打包后的 Electron 连接它，验证有账号数据时账号栏、联系人列表、聊天线程、账号详情、OTP、长连接和设置页都能渲染；同时会实际触发发送消息、注册探测、发起注册、提交注册 OTP、修改资料名称、2FA PIN、邮箱设置和邮箱 OTP 请求/校验等按钮链路。这个测试不依赖线上账号数量。
 
 ## 打包
 
