@@ -68,8 +68,8 @@ const server = http.createServer(async (req, res) => {
       wa_account_id: accountID,
       display_name: 'Mock Account',
       status: 'ACTIVE',
-      phone: { e164_number: '+15550100001' },
-      audit: { updated_at: '2026-06-12T00:00:00Z' },
+      phone: { e164_number: '+15550100001', country_iso2: 'US', country_calling_code: '1' },
+      audit: { created_at: '2026-06-11T23:00:00Z', updated_at: '2026-06-12T00:00:00Z' },
     }],
       next_cursor: 'page-2',
     });
@@ -338,7 +338,7 @@ async function main() {
       account.click();
       return true;
     `);
-    await route(client, '#/account', 'document.body.innerText.includes("Mock Account") && document.body.innerText.includes("profile-1") && document.body.innerText.includes("123456") && document.body.innerText.includes("connected")');
+    await route(client, '#/account', 'document.body.innerText.includes("Mock Account") && document.body.innerText.includes("profile-1") && document.body.innerText.includes("123456") && document.body.innerText.includes("connected") && document.body.innerText.includes("US") && Boolean([...document.querySelectorAll(".info-card")].find((card) => card.querySelector(".info-grid"))) && Boolean(document.querySelector("[data-action=refresh-avatar]"))');
     await runInPage(client, `
       const setValue = (input, value) => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);

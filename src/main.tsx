@@ -100,6 +100,7 @@ function DesktopApp() {
   const [accountCursor, setAccountCursor] = useState('');
   const [loadedAccounts, setLoadedAccounts] = useState<WAAccount[]>([]);
   const [accountSearch, setAccountSearch] = useState('');
+  const [accountAvatarVersion, setAccountAvatarVersion] = useState(() => String(Date.now()));
   const [toasts, setToasts] = useState<Toast[]>([]);
   const notify = (kind: Toast['kind'], message: string) => {
     const id = Date.now() + Math.random();
@@ -178,6 +179,7 @@ function DesktopApp() {
               account={account}
               connection={connections.get(accountID(account))}
               connectionLoading={connectionsQuery.isLoading}
+              avatarVersion={accountAvatarVersion}
               active={selectedAccountID === accountID(account)}
               onClick={() => {
                 setSelectedAccountID(accountID(account));
@@ -226,7 +228,13 @@ function DesktopApp() {
         ) : view === 'add' ? (
           <AddAccountPanel notify={notify} onChanged={() => { setAccountCursor(''); void queryClient.invalidateQueries({ queryKey: ['accounts'] }); }} />
         ) : view === 'account' ? (
-          <AccountPanel account={selectedAccount} notify={notify} onChanged={() => { setAccountCursor(''); void queryClient.invalidateQueries({ queryKey: ['accounts'] }); }} />
+          <AccountPanel
+            account={selectedAccount}
+            avatarVersion={accountAvatarVersion}
+            notify={notify}
+            onAvatarChanged={() => setAccountAvatarVersion(String(Date.now()))}
+            onChanged={() => { setAccountCursor(''); void queryClient.invalidateQueries({ queryKey: ['accounts'] }); }}
+          />
         ) : view === 'settings' ? (
           <SettingsPanel notify={notify} compact={false} />
         ) : (
@@ -261,13 +269,13 @@ function TopBar({ connected, config, checking, error, onRefresh }: { connected: 
   );
 }
 
-function AccountRow({ account, active, connection, connectionLoading, onClick }: { account: WAAccount; active: boolean; connection?: LongConnectionRecord; connectionLoading: boolean; onClick: () => void }) {
+function AccountRow({ account, active, connection, connectionLoading, avatarVersion, onClick }: { account: WAAccount; active: boolean; connection?: LongConnectionRecord; connectionLoading: boolean; avatarVersion: string; onClick: () => void }) {
   const id = accountID(account);
   const view = connectionView(connection, connectionLoading);
   return (
     <button className={`account-row ${active ? 'active' : ''}`} onClick={onClick}>
       <span className={`connection-dot ${view.tone}`} title={view.label} aria-label={view.label} />
-      <RemoteAvatar path={accountAvatarPath(id, String(account.audit?.updated_at || 'latest'))} label={accountTitle(account)} />
+      <RemoteAvatar path={accountAvatarPath(id, avatarVersion || String(account.audit?.updated_at || 'latest'))} label={accountTitle(account)} />
       <span>
         <strong>{accountTitle(account)}</strong>
         <small>{account.phone?.e164_number || id}</small>
@@ -483,7 +491,7 @@ function MessageBubble({ message, deleting, onDelete }: { message: AccountMessag
   );
 }
 
-function AccountPanel({ account, notify, onChanged }: { account?: WAAccount; notify: (kind: Toast['kind'], message: string) => void; onChanged: () => void }) {
+function AccountPanel({ account, avatarVersion, notify, onChanged, onAvatarChanged }: { account?: WAAccount; avatarVersion: string; notify: (kind: Toast['kind'], message: string) => void; onChanged: () => void; onAvatarChanged: () => void }) {
   const queryClient = useQueryClient();
   const accountId = accountID(account);
   const profilesQuery = useQuery({ queryKey: ['profiles', accountId], queryFn: () => getClientProfiles(accountId), enabled: Boolean(accountId), refetchInterval: 30000 });
@@ -501,7 +509,7 @@ function AccountPanel({ account, notify, onChanged }: { account?: WAAccount; not
   return (
     <section className="account-page">
       <div className="account-hero">
-        <RemoteAvatar path={accountAvatarPath(accountId, String(account.audit?.updated_at || 'latest'))} label={accountTitle(account)} large />
+        <RemoteAvatar path={accountAvatarPath(accountId, avatarVersion || String(account.audit?.updated_at || 'latest'))} label={accountTitle(account)} large />
         <div>
           <h1>{accountTitle(account)}</h1>
           <p>{account.phone?.e164_number || accountId}</p>
@@ -514,7 +522,8 @@ function AccountPanel({ account, notify, onChanged }: { account?: WAAccount; not
       </div>
       {isRegistrationPending(account) ? <ManualOtpCard account={account} notify={notify} onChanged={onChanged} /> : null}
       <div className="dashboard-grid">
-        <ProfileCard account={account} notify={notify} onChanged={() => { onChanged(); void queryClient.invalidateQueries({ queryKey: ['accounts'] }); }} />
+        <ProfileCard account={account} notify={notify} onChanged={() => { onChanged(); void queryClient.invalidateQueries({ queryKey: ['accounts'] }); }} onAvatarChanged={onAvatarChanged} />
+        <AccountInfoCard account={account} />
         <SecurityCard account={account} notify={notify} />
         <InfoCard title="设备指纹" icon={<Fingerprint size={17} />}>
           <ProfilesList profiles={profilesQuery.data?.client_profiles || []} loading={profilesQuery.isLoading} />
@@ -558,7 +567,30 @@ function ManualOtpCard({ account, notify, onChanged }: { account: WAAccount; not
   );
 }
 
-function ProfileCard({ account, notify, onChanged }: { account: WAAccount; notify: (kind: Toast['kind'], message: string) => void; onChanged: () => void }) {
+function AccountInfoCard({ account }: { account: WAAccount }) {
+  const rows = [
+    { label: '账号 ID', value: accountID(account) },
+    { label: '手机号', value: account.phone?.e164_number || '-' },
+    { label: '国家', value: account.phone?.country_iso2 || '-' },
+    { label: '拨号码', value: account.phone?.country_calling_code || '-' },
+    { label: '创建时间', value: formatDate(timestampValue(account.audit?.created_at), true) || '-' },
+    { label: '更新时间', value: formatDate(timestampValue(account.audit?.updated_at), true) || '-' },
+  ];
+  return (
+    <InfoCard title="账号信息" icon={<MonitorCog size={17} />}>
+      <dl className="info-grid">
+        {rows.map((row) => (
+          <div key={row.label}>
+            <dt>{row.label}</dt>
+            <dd>{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </InfoCard>
+  );
+}
+
+function ProfileCard({ account, notify, onChanged, onAvatarChanged }: { account: WAAccount; notify: (kind: Toast['kind'], message: string) => void; onChanged: () => void; onAvatarChanged: () => void }) {
   const [name, setName] = useState(account.display_name || '');
   const [fileName, setFileName] = useState('');
   const [pendingPicture, setPendingPicture] = useState<{ fileName: string; dataUrl: string; scale: number } | null>(null);
@@ -585,6 +617,7 @@ function ProfileCard({ account, notify, onChanged }: { account: WAAccount; notif
     },
     onSuccess: () => {
       notify('success', '头像已提交');
+      onAvatarChanged();
       onChanged();
     },
     onError: (error) => notify('error', errorMessage(error)),
@@ -593,6 +626,7 @@ function ProfileCard({ account, notify, onChanged }: { account: WAAccount; notif
     mutationFn: () => removeProfilePicture(accountId),
     onSuccess: () => {
       notify('success', '头像移除请求已提交');
+      onAvatarChanged();
       onChanged();
     },
     onError: (error) => notify('error', errorMessage(error)),
@@ -626,10 +660,16 @@ function ProfileCard({ account, notify, onChanged }: { account: WAAccount; notif
             }).catch((error) => notify('error', errorMessage(error)));
           }}
         />
-        <button className="secondary-button" onClick={() => fileRef.current?.click()}>
-          <Upload size={15} />
-          {fileName || '上传头像'}
-        </button>
+        <div className="inline-actions">
+          <button className="secondary-button" onClick={() => fileRef.current?.click()}>
+            <Upload size={15} />
+            {fileName || '上传头像'}
+          </button>
+          <button className="secondary-button" data-action="refresh-avatar" onClick={onAvatarChanged}>
+            <RefreshCw size={15} />
+            刷新头像
+          </button>
+        </div>
         {pendingPicture ? (
           <div className="avatar-cropper">
             <div className="crop-preview">

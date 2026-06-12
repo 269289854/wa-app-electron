@@ -271,6 +271,25 @@ button { cursor: pointer; }
 .form-grid { display: grid; gap: 12px; }
 .form-grid.two { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
 .form-grid label { display: grid; gap: 6px; color: #4b5563; font-size: 13px; font-weight: 650; }
+.info-grid { display: grid; gap: 10px; margin: 0; }
+.info-grid div {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+}
+.info-grid dt { color: #687382; font-size: 12px; font-weight: 650; }
+.info-grid dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #26313f;
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+}
 .field-hint { color: #687382; font-size: 12px; font-weight: 500; }
 .check-row { display: flex !important; grid-template-columns: auto 1fr; align-items: center; color: #293443 !important; font-weight: 500 !important; }
 .check-row input { width: auto; min-height: auto; }
