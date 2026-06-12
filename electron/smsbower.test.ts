@@ -38,4 +38,13 @@ describe('SMSBower helpers', () => {
     const prices = normalizePrices({ 187: { wa: { cost: '0.42', count: '7' }, tg: { cost: '0.01', count: '99' } } }, '187', 'wa');
     expect(prices).toEqual([{ country: '187', service: 'wa', cost: 0.42, count: 7 }]);
   });
+
+  it('normalizes alternative stock field names', () => {
+    expect(normalizePrices({ 33: { wa: { cost: '0.38', qty: '4' } } }, '33', 'wa')).toEqual([
+      { country: '33', service: 'wa', cost: 0.38, count: 4 },
+    ]);
+    expect(normalizePrices({ 33: { wa: { price: '0.39', stock: '2' } } }, '33', 'wa')).toEqual([
+      { country: '33', service: 'wa', cost: 0.39, count: 2 },
+    ]);
+  });
 });

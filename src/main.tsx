@@ -828,8 +828,16 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
       maxOrders: config.maxOrders,
     }));
     const prices = await window.smsbower.getPrices({ country: config.country });
+    appendDebugExchange(setDebugExchanges, debugInfo('SMSBower prices', {
+      country: config.country,
+      service: 'wa',
+      minPrice: config.minPrice,
+      maxPrice: config.maxPrice,
+      availablePrices: prices,
+      inRangePrices: prices.filter((item) => item.count > 0 && item.cost >= config.minPrice && item.cost <= config.maxPrice),
+    }));
     const price = selectSMSBowerPrice(prices, config);
-    if (!price) throw new Error('SMSBower has no WhatsApp number in the configured price range');
+    if (!price) throw new Error(smsbowerPriceErrorMessage(prices, config));
     appendDebugExchange(setDebugExchanges, debugInfo('SMSBower price ok', price));
 
     let successes = 0;
@@ -1235,6 +1243,18 @@ function selectSMSBowerPrice(prices: SMSBowerPrice[], config: SMSBowerPublicConf
   return prices
     .filter((item) => item.count > 0 && item.cost >= config.minPrice && item.cost <= config.maxPrice)
     .sort((left, right) => left.cost - right.cost)[0] || null;
+}
+
+function smsbowerPriceErrorMessage(prices: SMSBowerPrice[], config: SMSBowerPublicConfig) {
+  if (!prices.length) return 'SMSBower 没有返回 WhatsApp 价格数据，请确认国家 ID 是否正确，或稍后重试。';
+  const stocked = prices.filter((item) => item.count > 0);
+  if (!stocked.length) return 'SMSBower 当前国家的 WhatsApp 号码库存为 0，请更换国家或稍后重试。';
+  const cheapest = stocked.sort((left, right) => left.cost - right.cost)[0];
+  const summary = stocked.slice(0, 5).map((item) => `${item.cost}(${item.count})`).join(', ');
+  if (cheapest && cheapest.cost > config.maxPrice) {
+    return `SMSBower 有库存，但最低价格 ${cheapest.cost} 高于当前最高价 ${config.maxPrice}，请提高最高价格后再试。可用价格：${summary}`;
+  }
+  return `SMSBower 没有符合 ${config.minPrice}-${config.maxPrice} 的 WhatsApp 号码，请调整价格范围或更换国家。可用价格：${summary}`;
 }
 
 async function waitForSMSBowerCode(

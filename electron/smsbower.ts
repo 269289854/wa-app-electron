@@ -117,7 +117,18 @@ function collectPrices(value: unknown, prices: SMSBowerPrice[], country: string,
   const record = value as Record<string, unknown>;
   if ('cost' in record || 'price' in record) {
     const cost = Number(record.cost ?? record.price);
-    const count = Number(record.count ?? record.quantity ?? 0);
+    const count = Number(
+      record.count
+      ?? record.quantity
+      ?? record.qty
+      ?? record.amount
+      ?? record.available
+      ?? record.availability
+      ?? record.stock
+      ?? record.total
+      ?? record.numbers
+      ?? 0,
+    );
     if (Number.isFinite(cost)) prices.push({ country, service, cost, count: Number.isFinite(count) ? count : 0 });
   }
   for (const [key, nested] of Object.entries(record)) {
