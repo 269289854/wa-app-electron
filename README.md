@@ -1,14 +1,14 @@
 # wa-app-electron
 
-WA App 的 Electron + React 全平台客户端。
+WA App 的 Electron + React + Vite + TypeScript 全平台桌面客户端。
 
-## 当前阶段
+## 当前能力
 
-- Electron 主进程、preload 安全桥、React renderer、Vite、TypeScript 已搭建。
-- 默认支持连接远程服务，连接地址默认是 `https://wa.yizhimeng.uk`。
-- 访问密码通过客户端设置页输入并保存到本机配置，不写入源码或提交历史。
-- 已预留本地内置 `wa-app-service` 模式：后续把各平台二进制放入 `resources/wa-app-service/` 后可由客户端启动。
-- 桌面 UI 已覆盖网页端 dashboard 的主要操作入口：账号、注册/OTP、联系人、消息、资料、安全、设备指纹、长连接和设置。
+- 默认连接远程服务 `https://wa.yizhimeng.uk`，访问密码只通过本机设置或运行时环境变量提供，不写入源码、README 或提交历史。
+- Electron 主进程提供 preload 安全桥，renderer 只通过 `window.waConfig`、`window.waApi`、`window.waService` 调用桌面能力和 `/api/wa/...`。
+- 支持账号列表、账号删除、长连接状态、client profile/设备指纹、注册探测、注册 OTP、联系人、消息、发送文本消息、标记已读、删除消息、联系人删除、联系人自动解析、资料名称、头像上传裁剪、头像移除、2FA PIN、邮箱设置、邮箱 OTP 和远程连接配置。
+- 预留本地内置 `wa-app-service` 模式：后续把对应平台的 `wa-app-service` 二进制放入 `resources/wa-app-service/` 后，可由客户端启动，数据目录默认为 Electron `userData/wa-app-data`。
+- Windows/macOS/Linux 打包配置已在 `electron-builder` 中准备：Windows `nsis/zip`，macOS `dmg/zip`，Linux `AppImage/deb`。
 
 ## 开发
 
@@ -17,16 +17,70 @@ npm install
 npm run dev
 ```
 
-## 验证
+开发模式会启动 Vite dev server，并由 Electron 加载 `http://127.0.0.1:5173`。
+
+## 构建
 
 ```sh
+npm run lint
+npm run test
 npm run typecheck
 npm run build
 npx electron-builder --dir
 ```
+
+生产构建使用相对资源路径，打包后的 `file://` 页面不依赖 Vite dev server。
+
+## 远程验收
+
+远程 smoke 只读访问线上服务，不会把密码写入仓库。PowerShell 示例：
+
+```powershell
+$env:WA_APP_ELECTRON_SMOKE_PASSWORD = "<访问密码>"
+npm run smoke:remote-api
+Remove-Item Env:\WA_APP_ELECTRON_SMOKE_PASSWORD -ErrorAction SilentlyContinue
+```
+
+当前脚本会验证：
+
+- `/api/wa/health`
+- `/api/wa/accounts`
+- `/api/wa/long-connections`
+- 如果线上存在账号，会继续验证 client profiles、OTP 历史、联系人、消息列表。
+
+如果线上账号数为 0，账号内深层检查会显示为 `skipped`，这是当前数据状态导致的跳过，不代表这些入口未实现。
+
+## 桌面烟测
+
+先生成 unpacked 包：
+
+```powershell
+npm run build
+npx electron-builder --dir
+```
+
+再运行桌面 smoke：
+
+```powershell
+$env:WA_APP_ELECTRON_SMOKE_PASSWORD = "<访问密码>"
+npm run smoke:electron
+Remove-Item Env:\WA_APP_ELECTRON_SMOKE_PASSWORD -ErrorAction SilentlyContinue
+```
+
+桌面 smoke 会使用临时 `userData` 目录，并验证：
+
+- 打包后的页面通过 `file://` 加载。
+- React renderer 已真实挂载 `.app-shell`、`.account-rail`、`.workspace`，避免生产白屏回归。
+- preload 安全桥 `window.waConfig`、`window.waApi`、`window.waService` 存在。
+- 远程配置为 `remote`，地址为 `https://wa.yizhimeng.uk`。
+- 密码只在本机配置中保存为加密字段，不出现明文。
+- renderer 内部调用 `window.waConfig.testConnection()` 能通过远程健康检查。
+- DevTools 没有在生产窗口中打开。
 
 ## 打包
 
 ```sh
 npm run dist
 ```
+
+当前 Windows 环境已验证 `npx electron-builder --dir` 可以生成 `release/win-unpacked/WA App.exe` 并启动。完整安装包、macOS、Linux 产物需要在对应平台或 CI 环境继续跑 `npm run dist` 验证。
