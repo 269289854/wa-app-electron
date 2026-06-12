@@ -16,8 +16,17 @@ type ClientConfig = {
   hasPassword: boolean;
 };
 
+type WindowState = {
+  width: number;
+  height: number;
+  x?: number;
+  y?: number;
+  maximized?: boolean;
+};
+
 type StoredConfig = Omit<ClientConfig, 'hasPassword'> & {
   encryptedPassword?: string;
+  windowState?: WindowState;
 };
 
 type ApiRequestInput = {
@@ -45,6 +54,7 @@ function defaultConfig(): StoredConfig {
     localBaseUrl: '',
     localDataDir: join(app.getPath('userData'), 'wa-app-data'),
     autoStartLocalService: false,
+    windowState: { width: 1320, height: 860 },
   };
 }
 
@@ -69,7 +79,24 @@ function normalizeConfig(config: StoredConfig): StoredConfig {
     localDataDir: config.localDataDir || join(app.getPath('userData'), 'wa-app-data'),
     autoStartLocalService: Boolean(config.autoStartLocalService),
     encryptedPassword: config.encryptedPassword,
+    windowState: normalizeWindowState(config.windowState),
   };
+}
+
+function normalizeWindowState(value?: Partial<WindowState>): WindowState {
+  return {
+    width: boundedNumber(value?.width, 1060, 2400, 1320),
+    height: boundedNumber(value?.height, 680, 1800, 860),
+    x: typeof value?.x === 'number' ? value.x : undefined,
+    y: typeof value?.y === 'number' ? value.y : undefined,
+    maximized: Boolean(value?.maximized),
+  };
+}
+
+function boundedNumber(value: unknown, min: number, max: number, fallback: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(parsed)));
 }
 
 function publicConfig(config = readConfig()): ClientConfig {
@@ -254,9 +281,13 @@ function serviceStatus() {
 }
 
 function createWindow() {
+  const config = readConfig();
+  const state = normalizeWindowState(config.windowState);
   mainWindow = new BrowserWindow({
-    width: 1320,
-    height: 860,
+    width: state.width,
+    height: state.height,
+    x: state.x,
+    y: state.y,
     minWidth: 1060,
     minHeight: 680,
     title: 'WA App',
@@ -268,6 +299,8 @@ function createWindow() {
       sandbox: false,
     },
   });
+  if (state.maximized) mainWindow.maximize();
+  mainWindow.on('close', () => saveWindowState(mainWindow));
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
   if (devServerUrl) {
@@ -276,6 +309,22 @@ function createWindow() {
   } else {
     void mainWindow.loadFile(join(app.getAppPath(), 'dist', 'index.html'));
   }
+}
+
+function saveWindowState(window: BrowserWindow | null) {
+  if (!window) return;
+  const config = readConfig();
+  const bounds = window.getBounds();
+  writeConfig({
+    ...config,
+    windowState: {
+      width: bounds.width,
+      height: bounds.height,
+      x: bounds.x,
+      y: bounds.y,
+      maximized: window.isMaximized(),
+    },
+  });
 }
 
 app.whenReady().then(async () => {

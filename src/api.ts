@@ -30,7 +30,7 @@ export type ConnectionFilters = {
 };
 
 export async function apiRequest<T>(path: string, input: { method?: string; body?: unknown; timeoutMs?: number } = {}) {
-  const response = await window.waDesktop.waApi.request<T>({
+  const response = await window.waApi.request<T>({
     path,
     method: input.method,
     body: input.body,
@@ -42,7 +42,7 @@ export async function apiRequest<T>(path: string, input: { method?: string; body
 }
 
 export async function assetDataUrl(path: string) {
-  const asset = await window.waDesktop.waApi.fetchAsset(path);
+  const asset = await window.waApi.fetchAsset(path);
   if (!asset.ok || !asset.data) return '';
   return `data:${asset.contentType};base64,${asset.data}`;
 }

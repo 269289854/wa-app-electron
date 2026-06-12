@@ -91,10 +91,10 @@ function DesktopApp() {
     window.setTimeout(() => setToasts((items) => items.filter((toast) => toast.id !== id)), 4200);
   };
 
-  const configQuery = useQuery({ queryKey: ['config'], queryFn: () => window.waDesktop.waConfig.get() });
+  const configQuery = useQuery({ queryKey: ['config'], queryFn: () => window.waConfig.get() });
   const connectionQuery = useQuery({
     queryKey: ['connection'],
-    queryFn: () => window.waDesktop.waConfig.testConnection(),
+    queryFn: () => window.waConfig.testConnection(),
     enabled: Boolean(configQuery.data),
     refetchInterval: 30000,
   });
@@ -656,8 +656,8 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
 
 function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: string) => void; compact?: boolean }) {
   const queryClient = useQueryClient();
-  const configQuery = useQuery({ queryKey: ['config'], queryFn: () => window.waDesktop.waConfig.get() });
-  const serviceQuery = useQuery({ queryKey: ['service'], queryFn: () => window.waDesktop.waService.status(), refetchInterval: 10000 });
+  const configQuery = useQuery({ queryKey: ['config'], queryFn: () => window.waConfig.get() });
+  const serviceQuery = useQuery({ queryKey: ['service'], queryFn: () => window.waService.status(), refetchInterval: 10000 });
   const [form, setForm] = useState({ mode: 'remote' as ClientMode, remoteBaseUrl: '', localDataDir: '', autoStartLocalService: false, password: '' });
   useEffect(() => {
     if (!configQuery.data) return;
@@ -670,7 +670,7 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
     }));
   }, [configQuery.data]);
   const saveMutation = useMutation({
-    mutationFn: () => window.waDesktop.waConfig.set({ ...form, password: form.password || undefined }),
+    mutationFn: () => window.waConfig.set({ ...form, password: form.password || undefined }),
     onSuccess: async () => {
       notify('success', '连接配置已保存');
       await queryClient.invalidateQueries({ queryKey: ['config'] });
@@ -678,7 +678,7 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
     onError: (error) => notify('error', errorMessage(error)),
   });
   const testMutation = useMutation({
-    mutationFn: () => window.waDesktop.waConfig.testConnection({ ...form, password: form.password || undefined }),
+    mutationFn: () => window.waConfig.testConnection({ ...form, password: form.password || undefined }),
     onSuccess: async (result) => {
       notify(result.ok ? 'success' : 'error', result.ok ? '连接测试成功' : result.error || '连接测试失败');
       await queryClient.invalidateQueries({ queryKey: ['config'] });
@@ -686,14 +686,14 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
     },
   });
   const startMutation = useMutation({
-    mutationFn: () => window.waDesktop.waService.start(),
+    mutationFn: () => window.waService.start(),
     onSuccess: (status) => {
       notify(status.running ? 'success' : 'error', status.error || (status.running ? '本地服务已启动' : '本地服务不可用'));
       void serviceQuery.refetch();
     },
   });
   const stopMutation = useMutation({
-    mutationFn: () => window.waDesktop.waService.stop(),
+    mutationFn: () => window.waService.stop(),
     onSuccess: () => {
       notify('info', '本地服务已停止');
       void serviceQuery.refetch();

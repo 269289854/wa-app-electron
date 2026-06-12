@@ -18,3 +18,6 @@ const api = {
 };
 
 contextBridge.exposeInMainWorld('waDesktop', api);
+contextBridge.exposeInMainWorld('waConfig', api.waConfig);
+contextBridge.exposeInMainWorld('waApi', api.waApi);
+contextBridge.exposeInMainWorld('waService', api.waService);
