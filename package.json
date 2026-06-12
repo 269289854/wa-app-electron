@@ -1,0 +1,78 @@
+{
+  "name": "wa-app-electron",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cross-platform desktop client for wa-app.",
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:5173 && npm run electron:dev\"",
+    "electron:dev": "cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 tsx electron/main.ts",
+    "typecheck": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit",
+    "build": "tsc --noEmit && vite build && tsc -p electron/tsconfig.json",
+    "dist": "npm run build && electron-builder",
+    "start": "npm run build && electron ."
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.100.11",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.562.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^39.2.7",
+    "electron-builder": "^26.0.12",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0",
+    "wait-on": "^9.0.3"
+  },
+  "build": {
+    "appId": "uk.yizhimeng.waapp",
+    "productName": "WA App",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "resources",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Network"
+    }
+  }
+}
