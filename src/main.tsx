@@ -993,14 +993,49 @@ function ProfilesList({ profiles, loading }: { profiles: ClientProfile[]; loadin
   if (loading) return <InlineLoading text="加载设备指纹" />;
   if (!profiles.length) return <p className="muted">暂无客户端 profile。</p>;
   return (
-    <div className="mini-list">
+    <div className="profile-list">
       {profiles.map((profile, index) => (
-        <div key={profile.client_profile_id || index}>
-          <strong>{profile.client_profile_id || 'Client profile'}</strong>
-          <small>{profile.app_version || profile.locale_country || JSON.stringify(profile.device || {}).slice(0, 80)}</small>
-        </div>
+        <ProfileFingerprintBlock profile={profile} key={profile.client_profile_id || index} />
       ))}
     </div>
+  );
+}
+
+function ProfileFingerprintBlock({ profile }: { profile: ClientProfile }) {
+  const fingerprint = profile.device_fingerprint;
+  const rows = fingerprint ? [
+    { label: '指纹 ID', value: fingerprint.fingerprint_id },
+    { label: 'FDID', value: fingerprint.fdid },
+    { label: 'Android', value: fingerprint.android_version },
+    { label: 'RAM / Radio', value: [ramLabel(fingerprint.device_ram_gib), radioLabel(fingerprint.network_radio_type)].filter(Boolean).join(' / ') },
+    { label: 'MCC/MNC', value: pairLabel(fingerprint.mcc, fingerprint.mnc) },
+    { label: 'SIM MCC/MNC', value: pairLabel(fingerprint.sim_mcc, fingerprint.sim_mnc) },
+    { label: 'Phone Hash', value: fingerprint.phone_sha256_prefix ? `${fingerprint.phone_sha256_prefix}...` : '' },
+    { label: '生成时间', value: formatDate(timestampValue(fingerprint.created_at), true) },
+  ] : [];
+  return (
+    <article className="profile-block">
+      <header>
+        <div>
+          <strong>{deviceTitle(fingerprint)}</strong>
+          <small>{profile.client_profile_id || profile.protocol_profile_id || 'Client profile'}</small>
+        </div>
+        <span className={`profile-status ${profileStatusTone(profile.status)}`}>{profileStatusLabel(profile.status)}</span>
+      </header>
+      {rows.length ? (
+        <dl className="fingerprint-grid">
+          {rows.map((row) => (
+            <div key={row.label}>
+              <dt>{row.label}</dt>
+              <dd>{row.value || '-'}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="muted">没有可展示的设备指纹。</p>
+      )}
+      <small className="profile-meta">{[profile.app_version, profile.locale_language, profile.locale_country].filter(Boolean).join(' · ') || JSON.stringify(profile.device || {}).slice(0, 90)}</small>
+    </article>
   );
 }
 
@@ -1134,6 +1169,41 @@ function timestampMs(record: LongConnectionRecord) {
 function isRegistrationPending(account: WAAccount) {
   const status = String(account.status || '').toLowerCase();
   return status === '2' || status.includes('pending_registration') || status.includes('pending registration') || status.includes('otp');
+}
+
+function deviceTitle(fingerprint?: ClientProfile['device_fingerprint']) {
+  return fingerprint ? [fingerprint.device_vendor, fingerprint.device_model].filter(Boolean).join(' ') || '未知设备' : '未知设备';
+}
+
+function pairLabel(a?: string, b?: string) {
+  return [a, b].filter(Boolean).join('/');
+}
+
+function ramLabel(value?: string | number) {
+  return value === undefined || value === null || value === '' ? '' : `${value} GiB`;
+}
+
+function radioLabel(value?: string | number) {
+  const key = String(value || '');
+  const labels: Record<string, string> = { '1': 'GPRS', '2': 'EDGE', '3': 'UMTS', '9': 'HSDPA', '13': 'LTE', '20': 'NR' };
+  return key ? labels[key] || key : '';
+}
+
+function profileStatusLabel(status: unknown) {
+  const normalized = String(status || '').toLowerCase();
+  if (!normalized) return '未知';
+  if (normalized.includes('active') || normalized === '1') return '可用';
+  if (normalized.includes('disabled') || normalized.includes('blocked') || normalized.includes('failed')) return '不可用';
+  if (normalized.includes('pending')) return '等待中';
+  return String(status);
+}
+
+function profileStatusTone(status: unknown) {
+  const label = profileStatusLabel(status);
+  if (label === '可用') return 'ok';
+  if (label === '等待中') return 'warn';
+  if (label === '不可用') return 'bad';
+  return 'idle';
 }
 
 function unresolvedContactJIDs(records: Array<{ jid?: string; display_name?: string; number?: string; profile_picture_id?: string }>) {

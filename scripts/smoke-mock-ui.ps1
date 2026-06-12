@@ -75,7 +75,29 @@ const server = http.createServer(async (req, res) => {
     });
   }
   if (path === '/api/wa/client-profiles') return json(res, {
-    client_profiles: [{ client_profile_id: 'profile-1', app_version: '2.25.1', locale_country: 'US', device: { platform: 'desktop-smoke' } }],
+    client_profiles: [{
+      client_profile_id: 'profile-1',
+      status: 'CLIENT_PROFILE_STATUS_ACTIVE',
+      app_version: '2.25.1',
+      locale_language: 'en',
+      locale_country: 'US',
+      device: { platform: 'desktop-smoke' },
+      device_fingerprint: {
+        fingerprint_id: 'fp-1',
+        fdid: 'fdid-1',
+        device_vendor: 'SmokeVendor',
+        device_model: 'SmokePhone',
+        android_version: '14',
+        device_ram_gib: '8',
+        network_radio_type: '13',
+        mcc: '310',
+        mnc: '260',
+        sim_mcc: '310',
+        sim_mnc: '260',
+        phone_sha256_prefix: 'abcdef123456',
+        created_at: '2026-06-12T00:04:00Z',
+      },
+    }],
   });
   if (path === '/api/wa/contacts') return json(res, {
     contacts: [{
@@ -338,7 +360,7 @@ async function main() {
       account.click();
       return true;
     `);
-    await route(client, '#/account', 'document.body.innerText.includes("Mock Account") && document.body.innerText.includes("profile-1") && document.body.innerText.includes("123456") && document.body.innerText.includes("connected") && document.body.innerText.includes("US") && Boolean([...document.querySelectorAll(".info-card")].find((card) => card.querySelector(".info-grid"))) && Boolean(document.querySelector("[data-action=refresh-avatar]"))');
+    await route(client, '#/account', 'document.body.innerText.includes("Mock Account") && document.body.innerText.includes("profile-1") && document.body.innerText.includes("SmokeVendor SmokePhone") && document.body.innerText.includes("fdid-1") && document.body.innerText.includes("LTE") && document.body.innerText.includes("123456") && document.body.innerText.includes("connected") && document.body.innerText.includes("US") && Boolean([...document.querySelectorAll(".info-card")].find((card) => card.querySelector(".info-grid"))) && Boolean(document.querySelector("[data-action=refresh-avatar]"))');
     await runInPage(client, `
       const setValue = (input, value) => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);

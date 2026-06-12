@@ -38,12 +38,31 @@ export type ClientProfile = {
   client_profile_id?: string;
   wa_account_id?: string;
   protocol_profile_id?: string;
+  status?: string | number;
   device?: Record<string, unknown>;
+  device_fingerprint?: DeviceFingerprint;
   app_version?: string;
   locale_language?: string;
   locale_country?: string;
   created_at?: Timestamped;
   updated_at?: Timestamped;
+  [key: string]: unknown;
+};
+
+export type DeviceFingerprint = {
+  fingerprint_id?: string;
+  fdid?: string;
+  device_vendor?: string;
+  device_model?: string;
+  android_version?: string;
+  device_ram_gib?: string | number;
+  network_radio_type?: string | number;
+  mcc?: string;
+  mnc?: string;
+  sim_mcc?: string;
+  sim_mnc?: string;
+  phone_sha256_prefix?: string;
+  created_at?: Timestamped;
   [key: string]: unknown;
 };
 
