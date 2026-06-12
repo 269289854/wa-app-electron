@@ -58,6 +58,7 @@ import {
   verifyEmailOtp,
   type PhoneInput,
 } from './api';
+import { probeStatus, registrationMethods, statusReason } from './result-model';
 import type { AccountMessage, ClientProfile, WAAccount, WAContact, WorkflowResponse } from './types';
 
 const queryClient = new QueryClient({
@@ -553,6 +554,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
   const [pendingAccountID, setPendingAccountID] = useState('');
   const [otp, setOtp] = useState('');
   const input = resolvePhoneInput(phone, countryCallingCode);
+  const status = probeStatus(probe);
   const probeMutation = useMutation({
     mutationFn: () => probePhoneSMS(requirePhone(input)),
     onSuccess: (result) => {
@@ -600,20 +602,29 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
             <label>
               注册通道
               <select value={method} onChange={(event) => setMethod(event.target.value)}>
-                <option value="sms">SMS</option>
-                <option value="voice">Voice</option>
-                <option value="flash_call">Flash call</option>
-                <option value="wa_old">WA old</option>
-                <option value="silent_auth">Silent auth</option>
-                <option value="oauth_email">OAuth email</option>
+                {registrationMethods.map((item) => <option value={item.code} key={item.code}>{item.label}</option>)}
               </select>
             </label>
+            <div className={`result-banner ${status.tone}`}>
+              <strong>{status.label}</strong>
+              <span>{statusReason(status) || '完成号码探测后会显示通道状态。'}</span>
+            </div>
+            {status.methods.length ? (
+              <div className="method-grid">
+                {status.methods.map((item) => (
+                  <span className={item.available === true && !item.waitSeconds ? 'ok' : item.waitSeconds ? 'warn' : 'idle'} key={item.code}>
+                    {item.label}
+                    <small>{item.waitSeconds ? `冷却 ${item.waitSeconds}s` : item.available === true ? '可用' : '未知'}</small>
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <div className="inline-actions">
               <button className="secondary-button" disabled={probeMutation.isPending} onClick={() => probeMutation.mutate()}>
                 <Search size={15} />
                 探测号码
               </button>
-              <button className="primary-button" disabled={registerMutation.isPending} onClick={() => registerMutation.mutate()}>
+              <button className="primary-button" disabled={registerMutation.isPending || Boolean(probe && !status.canRegister)} onClick={() => registerMutation.mutate()}>
                 <Send size={15} />
                 发起注册
               </button>
