@@ -33,6 +33,7 @@ const text = (res, value) => {
 };
 
 const accountID = 'wa-account-1';
+const pendingAccountID = 'wa-account-pending';
 const contactID = 'contact-1';
 const operations = [];
 
@@ -52,15 +53,27 @@ const server = http.createServer(async (req, res) => {
   const path = url.pathname;
   if (path === '/healthz') return json(res, { ok: true, service: 'mock-wa-app', path: '/healthz' });
   if (path === '/__operations') return json(res, { operations });
-  if (path === '/api/wa/accounts') return json(res, {
-    accounts: [{
+  if (path === '/api/wa/accounts') {
+    if (url.searchParams.get('cursor') === 'page-2') return json(res, {
+      accounts: [{
+        wa_account_id: pendingAccountID,
+        display_name: 'Pending Account',
+        status: 'WA_ACCOUNT_STATUS_PENDING_REGISTRATION',
+        phone: { e164_number: '+15550100009' },
+        audit: { updated_at: '2026-06-12T00:05:00Z' },
+      }],
+    });
+    return json(res, {
+      accounts: [{
       wa_account_id: accountID,
       display_name: 'Mock Account',
       status: 'ACTIVE',
       phone: { e164_number: '+15550100001' },
       audit: { updated_at: '2026-06-12T00:00:00Z' },
     }],
-  });
+      next_cursor: 'page-2',
+    });
+  }
   if (path === '/api/wa/client-profiles') return json(res, {
     client_profiles: [{ client_profile_id: 'profile-1', app_version: '2.25.1', locale_country: 'US', device: { platform: 'desktop-smoke' } }],
   });
@@ -86,7 +99,10 @@ const server = http.createServer(async (req, res) => {
     otp_messages: [{ account_message_id: 'otp-1', display_text: '123456', received_at: '2026-06-12T00:03:00Z' }],
   });
   if (path === '/api/wa/long-connections') return json(res, {
-    states: [{ wa_account_id: accountID, status: 'connected', connected: true }],
+    states: [
+      { wa_account_id: accountID, status: 'connected', connected: true },
+      { wa_account_id: pendingAccountID, status: 'starting', connected: false },
+    ],
   });
   if (path === '/api/wa/account-settings/2fa/status') return json(res, {
     status: { configured: true, email_configured: true, email_verified: true, email_address: 'mock@example.com' },
@@ -178,7 +194,11 @@ function connectDebugger(webSocketUrl) {
 
 async function evaluate(client, expression, timeoutMs = 30000) {
   const result = await client.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, timeout: timeoutMs }, timeoutMs + 2000);
-  if (result.exceptionDetails) throw new Error(result.exceptionDetails.text || 'Runtime evaluation failed');
+  if (result.exceptionDetails) {
+    const detail = result.exceptionDetails;
+    const lines = [detail.exception?.description, detail.exception?.value, detail.text].filter(Boolean);
+    throw new Error(lines.join('\n') || 'Runtime evaluation failed');
+  }
   return result.result ? result.result.value : undefined;
 }
 
@@ -199,22 +219,26 @@ async function route(client, hash, expression, timeoutMs = 15000) {
   if (!ok) throw new Error(`Route ${hash} did not render expected content`);
 }
 
-async function waitForOperation(path, method = 'POST', timeoutMs = 15000) {
+async function getOperations() {
+  return new Promise((resolve, reject) => {
+    const req = http.get(`${expectedBaseUrl}/__operations`, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => body += chunk);
+      res.on('end', () => {
+        try { resolve(JSON.parse(body).operations || []); } catch (error) { reject(error); }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(5000, () => req.destroy(new Error('operation poll timeout')));
+  });
+}
+
+async function waitForOperation(path, method = 'POST', timeoutMs = 15000, afterIndex = 0) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const operations = await new Promise((resolve, reject) => {
-      const req = http.get(`${expectedBaseUrl}/__operations`, (res) => {
-        let body = '';
-        res.setEncoding('utf8');
-        res.on('data', (chunk) => body += chunk);
-        res.on('end', () => {
-          try { resolve(JSON.parse(body).operations || []); } catch (error) { reject(error); }
-        });
-      });
-      req.on('error', reject);
-      req.setTimeout(5000, () => req.destroy(new Error('operation poll timeout')));
-    });
-    const match = operations.find((operation) => operation.path === path && operation.method === method);
+    const operations = await getOperations();
+    const match = operations.slice(afterIndex).find((operation) => operation.path === path && operation.method === method);
     if (match) return match;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
@@ -222,7 +246,12 @@ async function waitForOperation(path, method = 'POST', timeoutMs = 15000) {
 }
 
 async function runInPage(client, source, timeoutMs = 30000) {
-  return evaluate(client, `(async () => { ${source} })()`, timeoutMs);
+  try {
+    new Function(`return (async () => { ${source} })()`);
+  } catch (error) {
+    throw new Error(`Invalid injected page script:\n${source}\n${error.message}`);
+  }
+  return evaluate(client, `(new Function('return (async () => { ' + ${JSON.stringify(source)} + ' })()'))()`, timeoutMs);
 }
 
 async function main() {
@@ -236,6 +265,30 @@ async function main() {
     checks.config = await evaluate(client, 'window.waConfig.get().then((config) => ({ remoteBaseUrl: config.remoteBaseUrl, hasPassword: config.hasPassword }))');
     if (checks.config.remoteBaseUrl !== expectedBaseUrl || !checks.config.hasPassword) throw new Error('Mock config was not applied');
     checks.accountRail = await waitForExpression(client, 'document.body.innerText.includes("Mock Account")');
+    checks.connectionDot = await waitForExpression(client, 'Boolean(document.querySelector(".connection-dot.ok"))');
+    const operationsBeforeManualOtp = (await getOperations()).length;
+    await runInPage(client, `
+      const setValue = (input, value) => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      const search = document.querySelector('.rail-search input');
+      if (!search) throw new Error('Account rail search input not found');
+      setValue(search, 'does-not-exist');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if ([...document.querySelectorAll('.account-row')].some((row) => row.innerText.includes('Mock Account'))) throw new Error('Account rail search did not filter accounts');
+      setValue(search, '');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      return true;
+    `);
+    const loadedMore = await runInPage(client, `
+      const button = document.querySelector('.load-more-button');
+      if (!button) throw new Error('Load more accounts button not found');
+      button.click();
+      return true;
+    `);
+    if (!loadedMore) throw new Error('Load more accounts action failed');
+    checks.accountPagination = await waitForExpression(client, 'document.body.innerText.includes("Pending Account") && Boolean(document.querySelector(".connection-dot.warn"))');
     checks.chatThread = await waitForExpression(client, 'document.body.innerText.includes("Mock Contact") && document.body.innerText.includes("Mock hello") && document.body.innerText.includes("Mock reply")');
     await runInPage(client, `
       const setValue = (input, value) => {
@@ -252,6 +305,39 @@ async function main() {
     const sentMessage = await waitForOperation('/api/wa/messages/send');
     if (sentMessage.body.text !== 'Smoke send message') throw new Error('Send message payload was not recorded');
     checks.sendMessage = true;
+    await runInPage(client, `
+      const rows = [...document.querySelectorAll('.account-row')];
+      const pending = rows.find((row) => row.innerText.includes('Pending Account'));
+      if (!pending) throw new Error('Pending account row not found');
+      pending.click();
+      return true;
+    `);
+    await route(client, '#/account', 'document.body.innerText.includes("Pending Account") && Boolean(document.querySelector("input[autocomplete=one-time-code]"))');
+    await runInPage(client, `
+      const setValue = (input, value) => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      const manualCard = [...document.querySelectorAll('.info-card')].find((card) => card.querySelector('input[autocomplete="one-time-code"]'));
+      if (!manualCard) throw new Error('Manual OTP card not found');
+      const otp = manualCard.querySelector('input[type="password"]');
+      const button = manualCard.querySelector('.primary-button');
+      setValue(otp, '222333');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (!button || button.disabled) throw new Error('Manual OTP button is not ready');
+      button.click();
+      return true;
+    `);
+    const manualOtp = await waitForOperation('/api/wa/actions/registration/resume-otp', 'POST', 15000, operationsBeforeManualOtp);
+    if (manualOtp.body.wa_account_id !== 'wa-account-pending' || manualOtp.body.otp !== '222333') throw new Error('Manual pending-account OTP payload was not recorded');
+    checks.pendingAccountOtp = true;
+    await runInPage(client, `
+      const rows = [...document.querySelectorAll('.account-row')];
+      const account = rows.find((row) => row.innerText.includes('Mock Account'));
+      if (!account) throw new Error('Mock account row not found after pending OTP');
+      account.click();
+      return true;
+    `);
     await route(client, '#/account', 'document.body.innerText.includes("Mock Account") && document.body.innerText.includes("profile-1") && document.body.innerText.includes("123456") && document.body.innerText.includes("connected")');
     await runInPage(client, `
       const setValue = (input, value) => {
@@ -350,6 +436,7 @@ async function main() {
       return true;
     `);
     await waitForOperation('/api/wa/register');
+    const operationsBeforeRegistrationOtp = (await getOperations()).length;
     await runInPage(client, `
       const setValue = (input, value) => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
@@ -368,7 +455,7 @@ async function main() {
       button.click();
       return true;
     `);
-    await waitForOperation('/api/wa/actions/registration/resume-otp');
+    await waitForOperation('/api/wa/actions/registration/resume-otp', 'POST', 15000, operationsBeforeRegistrationOtp);
     checks.registrationActions = true;
     await route(client, '#/settings', 'Boolean(document.querySelector(".app-shell[data-view=settings]") && document.querySelector(".settings-page") && document.querySelector("input[type=password]"))');
     checks.settingsPage = true;

@@ -58,6 +58,7 @@ import {
   setTwoFactorPIN,
   submitRegistrationOTP,
   verifyEmailOtp,
+  timestampValue,
   type PhoneInput,
 } from './api';
 import { probeStatus, registrationMethods, statusReason } from './result-model';
@@ -96,6 +97,9 @@ function DesktopApp() {
   const setView = (next: View) => navigate(`/${next}`);
   const [selectedAccountID, setSelectedAccountID] = useState('');
   const [selectedContactID, setSelectedContactID] = useState('');
+  const [accountCursor, setAccountCursor] = useState('');
+  const [loadedAccounts, setLoadedAccounts] = useState<WAAccount[]>([]);
+  const [accountSearch, setAccountSearch] = useState('');
   const [toasts, setToasts] = useState<Toast[]>([]);
   const notify = (kind: Toast['kind'], message: string) => {
     const id = Date.now() + Math.random();
@@ -111,16 +115,35 @@ function DesktopApp() {
     refetchInterval: 30000,
   });
   const accountsQuery = useQuery({
-    queryKey: ['accounts'],
-    queryFn: () => getAccounts(),
+    queryKey: ['accounts', accountCursor],
+    queryFn: () => getAccounts(accountCursor),
     enabled: connectionQuery.data?.ok === true,
     refetchInterval: 10000,
   });
-  const accounts = accountsQuery.data?.accounts || [];
+  const connectionsQuery = useQuery({
+    queryKey: ['connections'],
+    queryFn: () => getConnections(),
+    enabled: connectionQuery.data?.ok === true,
+    refetchInterval: 5000,
+  });
+  const pageAccounts = accountsQuery.data?.accounts || [];
+  useEffect(() => {
+    if (!accountsQuery.data) return;
+    setLoadedAccounts((current) => mergeAccounts(accountCursor ? current : [], pageAccounts));
+  }, [accountCursor, accountsQuery.data, pageAccounts]);
+  useEffect(() => {
+    if (connectionQuery.data?.ok !== true) {
+      setAccountCursor('');
+      setLoadedAccounts([]);
+    }
+  }, [connectionQuery.data?.ok]);
+  const accounts = loadedAccounts.length ? loadedAccounts : pageAccounts;
+  const filteredAccounts = useMemo(() => filterAccounts(accounts, accountSearch), [accountSearch, accounts]);
+  const connections = useMemo(() => indexConnections(connectionsQuery.data), [connectionsQuery.data]);
 
   useEffect(() => {
-    if (!selectedAccountID && accounts[0]) setSelectedAccountID(accountID(accounts[0]));
-  }, [accounts, selectedAccountID]);
+    if (!selectedAccountID && filteredAccounts[0]) setSelectedAccountID(accountID(filteredAccounts[0]));
+  }, [filteredAccounts, selectedAccountID]);
 
   useEffect(() => {
     if (routeView && view !== routeView) navigate('/chats', { replace: true });
@@ -143,12 +166,18 @@ function DesktopApp() {
           <Plus size={16} />
           添加账号
         </button>
+        <label className="rail-search">
+          <Search size={15} />
+          <input value={accountSearch} onChange={(event) => setAccountSearch(event.target.value)} placeholder="搜索账号" />
+        </label>
         <div className="rail-list">
-          {accountsQuery.isLoading ? <InlineLoading text="加载账号" /> : null}
-          {accounts.map((account) => (
+          {accountsQuery.isLoading && !accounts.length ? <InlineLoading text="加载账号" /> : null}
+          {filteredAccounts.map((account) => (
             <AccountRow
               key={accountID(account)}
               account={account}
+              connection={connections.get(accountID(account))}
+              connectionLoading={connectionsQuery.isLoading}
               active={selectedAccountID === accountID(account)}
               onClick={() => {
                 setSelectedAccountID(accountID(account));
@@ -157,6 +186,13 @@ function DesktopApp() {
             />
           ))}
           {!accountsQuery.isLoading && accounts.length === 0 ? <p className="muted small">还没有账号，先添加一个。</p> : null}
+          {!accountsQuery.isLoading && accounts.length > 0 && filteredAccounts.length === 0 ? <p className="muted small">没有匹配的账号。</p> : null}
+          {accountsQuery.data?.next_cursor ? (
+            <button className="load-more-button" disabled={accountsQuery.isFetching} onClick={() => setAccountCursor(accountsQuery.data?.next_cursor || '')}>
+              {accountsQuery.isFetching ? <Loader2 className="spin" size={14} /> : null}
+              加载更多账号
+            </button>
+          ) : null}
         </div>
         <nav className="bottom-nav">
           <button className={view === 'chats' ? 'active' : ''} onClick={() => setView('chats')}>
@@ -182,14 +218,15 @@ function DesktopApp() {
           onRefresh={() => {
             void connectionQuery.refetch();
             void accountsQuery.refetch();
+            void connectionsQuery.refetch();
           }}
         />
         {!connected && view !== 'settings' ? (
           <SettingsPanel notify={notify} compact={false} />
         ) : view === 'add' ? (
-          <AddAccountPanel notify={notify} onChanged={() => void accountsQuery.refetch()} />
+          <AddAccountPanel notify={notify} onChanged={() => { setAccountCursor(''); void queryClient.invalidateQueries({ queryKey: ['accounts'] }); }} />
         ) : view === 'account' ? (
-          <AccountPanel account={selectedAccount} notify={notify} onChanged={() => void accountsQuery.refetch()} />
+          <AccountPanel account={selectedAccount} notify={notify} onChanged={() => { setAccountCursor(''); void queryClient.invalidateQueries({ queryKey: ['accounts'] }); }} />
         ) : view === 'settings' ? (
           <SettingsPanel notify={notify} compact={false} />
         ) : (
@@ -224,10 +261,12 @@ function TopBar({ connected, config, checking, error, onRefresh }: { connected: 
   );
 }
 
-function AccountRow({ account, active, onClick }: { account: WAAccount; active: boolean; onClick: () => void }) {
+function AccountRow({ account, active, connection, connectionLoading, onClick }: { account: WAAccount; active: boolean; connection?: LongConnectionRecord; connectionLoading: boolean; onClick: () => void }) {
   const id = accountID(account);
+  const view = connectionView(connection, connectionLoading);
   return (
     <button className={`account-row ${active ? 'active' : ''}`} onClick={onClick}>
+      <span className={`connection-dot ${view.tone}`} title={view.label} aria-label={view.label} />
       <RemoteAvatar path={accountAvatarPath(id, String(account.audit?.updated_at || 'latest'))} label={accountTitle(account)} />
       <span>
         <strong>{accountTitle(account)}</strong>
@@ -473,6 +512,7 @@ function AccountPanel({ account, notify, onChanged }: { account?: WAAccount; not
           删除账号
         </button>
       </div>
+      {isRegistrationPending(account) ? <ManualOtpCard account={account} notify={notify} onChanged={onChanged} /> : null}
       <div className="dashboard-grid">
         <ProfileCard account={account} notify={notify} onChanged={() => { onChanged(); void queryClient.invalidateQueries({ queryKey: ['accounts'] }); }} />
         <SecurityCard account={account} notify={notify} />
@@ -487,6 +527,34 @@ function AccountPanel({ account, notify, onChanged }: { account?: WAAccount; not
         </InfoCard>
       </div>
     </section>
+  );
+}
+
+function ManualOtpCard({ account, notify, onChanged }: { account: WAAccount; notify: (kind: Toast['kind'], message: string) => void; onChanged: () => void }) {
+  const [otp, setOtp] = useState('');
+  const accountId = accountID(account);
+  const otpMutation = useMutation({
+    mutationFn: () => submitRegistrationOTP(accountId, otp.trim()),
+    onSuccess: (result) => {
+      notify(result.success === false || result.error_message ? 'error' : 'success', result.error_message || 'OTP 已提交');
+      setOtp('');
+      onChanged();
+    },
+    onError: (error) => notify('error', errorMessage(error)),
+  });
+  return (
+    <InfoCard title="提交注册 OTP" icon={<KeyRound size={17} />}>
+      <div className="form-grid two">
+        <label>
+          验证码
+          <input value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D+/g, '').slice(0, 8))} type="password" inputMode="numeric" autoComplete="one-time-code" />
+        </label>
+        <button className="primary-button" disabled={!otp.trim() || otpMutation.isPending} onClick={() => otpMutation.mutate()}>
+          {otpMutation.isPending ? <Loader2 className="spin" size={15} /> : <KeyRound size={15} />}
+          提交
+        </button>
+      </div>
+    </InfoCard>
   );
 }
 
@@ -961,6 +1029,71 @@ function resolvePhoneInput(phone: string, countryCallingCode: string): PhoneInpu
 function requirePhone(input: PhoneInput | null) {
   if (!input) throw new Error('请输入手机号和国家拨号码');
   return input;
+}
+
+type LongConnectionRecord = Record<string, unknown>;
+
+function mergeAccounts(current: WAAccount[], next: WAAccount[]) {
+  const merged = new Map(current.map((account) => [accountID(account), account]));
+  for (const account of next) {
+    const id = accountID(account);
+    if (id) merged.set(id, account);
+  }
+  return [...merged.values()];
+}
+
+function filterAccounts(accounts: WAAccount[], query: string) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return accounts;
+  return accounts.filter((account) => {
+    const haystack = [accountTitle(account), account.phone?.e164_number, account.phone?.country_iso2, accountID(account)].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(normalized);
+  });
+}
+
+function indexConnections(data?: { states?: LongConnectionRecord[]; connections?: LongConnectionRecord[] }) {
+  const records = [...(data?.connections || []), ...(data?.states || [])];
+  return records.reduce((map, record) => {
+    const id = String(record.wa_account_id || '');
+    if (!id) return map;
+    const current = map.get(id);
+    if (!current || betterConnection(record, current)) map.set(id, record);
+    return map;
+  }, new Map<string, LongConnectionRecord>());
+}
+
+function connectionView(connection: LongConnectionRecord | undefined, loading: boolean) {
+  const status = String(connection?.status || '').toLowerCase();
+  if (loading && !connection) return { label: '连接状态加载中', tone: 'idle' };
+  if (connection?.connected === true || status.includes('connected') || status.includes('heartbeat')) return { label: '已连接', tone: 'ok' };
+  if (status.includes('reconnect') || status.includes('starting')) return { label: '连接中', tone: 'warn' };
+  if (status.includes('failed') || status.includes('error')) return { label: '连接失败', tone: 'bad' };
+  return { label: '未连接', tone: 'idle' };
+}
+
+function connectionRank(connection: LongConnectionRecord) {
+  const tone = connectionView(connection, false).tone;
+  if (tone === 'ok') return 0;
+  if (tone === 'warn') return 1;
+  if (tone === 'bad') return 2;
+  return 3;
+}
+
+function betterConnection(next: LongConnectionRecord, current: LongConnectionRecord) {
+  const nextRank = connectionRank(next);
+  const currentRank = connectionRank(current);
+  if (nextRank !== currentRank) return nextRank < currentRank;
+  return timestampMs(next) > timestampMs(current);
+}
+
+function timestampMs(record: LongConnectionRecord) {
+  const date = timestampValue(record.updated_at || record.last_heartbeat_at || record.connected_at || record.created_at);
+  return date?.getTime() || 0;
+}
+
+function isRegistrationPending(account: WAAccount) {
+  const status = String(account.status || '').toLowerCase();
+  return status === '2' || status.includes('pending_registration') || status.includes('pending registration') || status.includes('otp');
 }
 
 function unresolvedContactJIDs(records: Array<{ jid?: string; display_name?: string; number?: string; profile_picture_id?: string }>) {
