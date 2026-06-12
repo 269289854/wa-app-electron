@@ -115,16 +115,18 @@ function DesktopApp() {
     enabled: Boolean(configQuery.data),
     refetchInterval: 30000,
   });
+  const needsRemotePassword = configQuery.data?.mode === 'remote' && !configQuery.data.hasPassword;
+  const apiReady = connectionQuery.data?.ok === true && !needsRemotePassword;
   const accountsQuery = useQuery({
     queryKey: ['accounts', accountCursor],
     queryFn: () => getAccounts(accountCursor),
-    enabled: connectionQuery.data?.ok === true,
+    enabled: apiReady,
     refetchInterval: 10000,
   });
   const connectionsQuery = useQuery({
     queryKey: ['connections'],
     queryFn: () => getConnections(),
-    enabled: connectionQuery.data?.ok === true,
+    enabled: apiReady,
     refetchInterval: 5000,
   });
   const pageAccounts = accountsQuery.data?.accounts || [];
@@ -151,7 +153,7 @@ function DesktopApp() {
   }, [navigate, routeView, view]);
 
   const selectedAccount = accounts.find((account) => accountID(account) === selectedAccountID);
-  const connected = connectionQuery.data?.ok === true;
+  const connected = apiReady;
 
   return (
     <div className="app-shell" data-view={view}>
@@ -216,11 +218,13 @@ function DesktopApp() {
           connected={connected}
           config={configQuery.data}
           checking={connectionQuery.isFetching}
-          error={connectionQuery.data?.error}
+          error={needsRemotePassword ? 'Set the access password in Settings first.' : connectionQuery.data?.error}
           onRefresh={() => {
             void connectionQuery.refetch();
-            void accountsQuery.refetch();
-            void connectionsQuery.refetch();
+            if (apiReady) {
+              void accountsQuery.refetch();
+              void connectionsQuery.refetch();
+            }
           }}
         />
         {!connected && view !== 'settings' ? (
