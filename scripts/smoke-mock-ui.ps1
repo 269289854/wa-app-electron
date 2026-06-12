@@ -445,18 +445,11 @@ async function main() {
       await new Promise((resolve) => setTimeout(resolve, 250));
       const actions = document.querySelector('.add-page .inline-actions');
       const buttons = [...actions.querySelectorAll('button')];
-      if (!buttons[0] || buttons[0].disabled) throw new Error('Probe button is not ready');
+      if (!buttons[0] || buttons[0].disabled || !buttons[0].innerText.includes('探测')) throw new Error('Probe/register button is not ready');
       buttons[0].click();
       return true;
     `);
     await waitForOperation('/api/wa/phone/sms-probe');
-    await runInPage(client, `
-      const actions = document.querySelector('.add-page .inline-actions');
-      const buttons = [...actions.querySelectorAll('button')];
-      if (!buttons[1] || buttons[1].disabled) throw new Error('Register button is not ready');
-      buttons[1].click();
-      return true;
-    `);
     await waitForOperation('/api/wa/register');
     const operationsBeforeRegistrationOtp = (await getOperations()).length;
     await runInPage(client, `
@@ -479,7 +472,7 @@ async function main() {
     `);
     await waitForOperation('/api/wa/actions/registration/resume-otp', 'POST', 15000, operationsBeforeRegistrationOtp);
     checks.registrationActions = true;
-    await route(client, '#/settings', 'Boolean(document.querySelector(".app-shell[data-view=settings]") && document.querySelector(".settings-page") && document.querySelector("input[type=password]"))');
+    await route(client, '#/settings', 'Boolean(document.querySelector(".app-shell[data-view=settings]") && document.querySelector(".settings-page") && document.body.innerText.includes("SMSBower API Key") && document.body.innerText.includes("启用 SMSBower"))');
     checks.settingsPage = true;
   } finally {
     client.close();

@@ -3,12 +3,14 @@ import {
   authPasswordRef,
   defaultConfig,
   getPassword,
+  getSMSBowerApiKey,
   normalizeBaseUrl,
   normalizeConfig,
   normalizeWindowState,
   parseTestConfig,
   publicConfig,
   setPassword,
+  setSMSBowerApiKey,
   type PasswordCodec,
 } from './config.js';
 
@@ -30,6 +32,7 @@ describe('electron config helpers', () => {
     expect(config.mode).toBe('remote');
     expect(config.remoteBaseUrl).toBe('https://wa.yizhimeng.uk');
     expect(config.localDataDir).toContain('wa-app-data');
+    expect(config.smsbower).toMatchObject({ enabled: false, targetSuccessCount: 1, maxOrders: 3 });
     expect(config.windowState).toEqual({ width: 1320, height: 860 });
   });
 
@@ -52,6 +55,28 @@ describe('electron config helpers', () => {
     expect(config.windowState).toMatchObject({ width: 2400, height: 680, maximized: true });
   });
 
+  it('keeps SMSBower decimal price bounds while normalizing integer limits', () => {
+    const config = normalizeConfig({
+      ...defaultConfig('C:/data'),
+      smsbower: {
+        enabled: true,
+        country: '187',
+        minPrice: 0.12,
+        maxPrice: 0.48,
+        targetSuccessCount: 1.8,
+        maxOrders: 2.2,
+        pollIntervalSeconds: 4.7,
+        otpTimeoutSeconds: 90.2,
+      },
+    }, 'C:/data');
+    expect(config.smsbower.minPrice).toBe(0.12);
+    expect(config.smsbower.maxPrice).toBe(0.48);
+    expect(config.smsbower.targetSuccessCount).toBe(2);
+    expect(config.smsbower.maxOrders).toBe(2);
+    expect(config.smsbower.pollIntervalSeconds).toBe(5);
+    expect(config.smsbower.otpTimeoutSeconds).toBe(90);
+  });
+
   it('bounds persisted window state', () => {
     expect(normalizeWindowState({ width: 100, height: 3000, x: 12, y: 24 })).toEqual({
       width: 1060,
@@ -68,6 +93,42 @@ describe('electron config helpers', () => {
     expect(config.authPasswordRef).toBe(authPasswordRef);
     expect(JSON.stringify(config)).not.toContain('abc');
     expect('encryptedPassword' in config).toBe(false);
+  });
+
+  it('publishes SMSBower config without exposing the stored API key', () => {
+    const stored = setSMSBowerApiKey({
+      ...defaultConfig('C:/data'),
+      smsbower: {
+        ...defaultConfig('C:/data').smsbower,
+        enabled: true,
+        country: '187',
+        maxPrice: 0.5,
+      },
+    }, ' key-123 ', encryptedCodec);
+    const config = publicConfig(stored);
+    expect(config.smsbower).toMatchObject({ enabled: true, country: '187', hasApiKey: true, configured: true });
+    expect(JSON.stringify(config)).not.toContain('key-123');
+    expect(getSMSBowerApiKey(stored, encryptedCodec)).toBe('key-123');
+
+    const cleared = setSMSBowerApiKey(stored, '', encryptedCodec);
+    expect(cleared.smsbower.encryptedApiKey).toBeUndefined();
+    expect(publicConfig(cleared).smsbower.hasApiKey).toBe(false);
+  });
+
+  it('requires SMSBower key, country, and max price before marking it configured', () => {
+    const base = {
+      ...defaultConfig('C:/data'),
+      smsbower: {
+        ...defaultConfig('C:/data').smsbower,
+        enabled: true,
+        country: '187',
+        maxPrice: 0.5,
+      },
+    };
+    expect(publicConfig(base).smsbower.configured).toBe(false);
+    expect(publicConfig(setSMSBowerApiKey({ ...base, smsbower: { ...base.smsbower, country: '' } }, 'key', plainCodec)).smsbower.configured).toBe(false);
+    expect(publicConfig(setSMSBowerApiKey({ ...base, smsbower: { ...base.smsbower, maxPrice: 0 } }, 'key', plainCodec)).smsbower.configured).toBe(false);
+    expect(publicConfig(setSMSBowerApiKey(base, 'key', plainCodec)).smsbower.configured).toBe(true);
   });
 
   it('sets, reads, and clears stored passwords without returning plaintext in config', () => {

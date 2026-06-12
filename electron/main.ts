@@ -7,14 +7,18 @@ import { fileURLToPath } from 'node:url';
 import {
   defaultConfig,
   getPassword as decodePassword,
+  getSMSBowerApiKey as decodeSMSBowerApiKey,
   normalizeConfig as normalizeStoredConfig,
+  normalizeSMSBowerConfig,
   normalizeWindowState,
   parseTestConfig,
   publicConfig as toPublicConfig,
+  setSMSBowerApiKey as applySMSBowerApiKey,
   setPassword as applyPassword,
   type ClientConfig,
   type StoredConfig,
 } from './config.js';
+import { SMSBowerClient, smsbowerWhatsAppService } from './smsbower.js';
 
 type ApiRequestInput = {
   path: string;
@@ -23,6 +27,12 @@ type ApiRequestInput = {
   headers?: Record<string, string>;
   timeoutMs?: number;
 };
+
+type ClientConfigPatch = Partial<ClientConfig> & { password?: string; smsbowerApiKey?: string };
+
+type SMSBowerPriceInput = { country?: string };
+type SMSBowerNumberInput = { country?: string; maxPrice?: number };
+type SMSBowerSetStatusInput = { id: string; status: number };
 
 const userDataDirOverride = process.env.WA_APP_ELECTRON_USER_DATA_DIR?.trim();
 if (userDataDirOverride) app.setPath('userData', userDataDirOverride);
@@ -35,7 +45,7 @@ function configPath() {
   return join(app.getPath('userData'), 'config.json');
 }
 
-function testConfigFromEnv(): (Partial<ClientConfig> & { password?: string }) | null {
+function testConfigFromEnv(): ClientConfigPatch | null {
   return parseTestConfig(process.env.WA_APP_ELECTRON_TEST_CONFIG);
 }
 
@@ -70,6 +80,12 @@ function setPassword(config: StoredConfig, password?: string) {
 
 function getPassword(config = readConfig()) {
   return decodePassword(config, safeStorage);
+}
+
+function getSMSBowerClient(config = readConfig()) {
+  const apiKey = decodeSMSBowerApiKey(config, safeStorage);
+  if (!apiKey) throw new Error('SMSBower API key is not configured');
+  return new SMSBowerClient({ apiKey });
 }
 
 function activeBaseUrl(config = readConfig()) {
@@ -129,9 +145,9 @@ async function requestAsset(path: string) {
   }
 }
 
-async function testConnection(configPatch?: Partial<ClientConfig> & { password?: string }) {
+async function testConnection(configPatch?: ClientConfigPatch) {
   const previous = readConfig();
-  const next = normalizeConfig(setPassword({ ...previous, ...configPatch }, configPatch?.password));
+  const next = applyConfigPatch(previous, configPatch);
   writeConfig(next);
   try {
     const health = await requestHealth();
@@ -139,6 +155,16 @@ async function testConnection(configPatch?: Partial<ClientConfig> & { password?:
   } catch (error) {
     return { ok: false, error: errorMessage(error), config: publicConfig(next) };
   }
+}
+
+function applyConfigPatch(previous: StoredConfig, patch?: ClientConfigPatch) {
+  if (!patch) return normalizeConfig(previous);
+  const merged = normalizeConfig({
+    ...previous,
+    ...patch,
+    smsbower: normalizeSMSBowerConfig({ ...previous.smsbower, ...patch.smsbower }),
+  });
+  return normalizeConfig(applySMSBowerApiKey(setPassword(merged, patch.password), patch.smsbowerApiKey, safeStorage));
 }
 
 async function requestHealth() {
@@ -269,23 +295,48 @@ function saveWindowState(window: BrowserWindow | null) {
 app.whenReady().then(async () => {
   const testConfig = testConfigFromEnv();
   if (testConfig) {
-    const next = normalizeConfig(setPassword({ ...readConfig(), ...testConfig }, testConfig.password));
+    const next = applyConfigPatch(readConfig(), testConfig);
     writeConfig(next);
   }
   const config = readConfig();
   if (config.mode === 'local' && config.autoStartLocalService) await startLocalService();
   ipcMain.handle('wa-config:get', () => publicConfig());
-  ipcMain.handle('wa-config:set', (_event, input: Partial<ClientConfig> & { password?: string }) => {
-    const next = normalizeConfig(setPassword({ ...readConfig(), ...input }, input.password));
+  ipcMain.handle('wa-config:set', (_event, input: ClientConfigPatch) => {
+    const next = applyConfigPatch(readConfig(), input);
     writeConfig(next);
     return publicConfig(next);
   });
-  ipcMain.handle('wa-config:test', (_event, input?: Partial<ClientConfig> & { password?: string }) => testConnection(input));
+  ipcMain.handle('wa-config:test', (_event, input?: ClientConfigPatch) => testConnection(input));
   ipcMain.handle('wa-api:request', (_event, input: ApiRequestInput) => requestJSON(input));
   ipcMain.handle('wa-api:asset', (_event, path: string) => requestAsset(path));
   ipcMain.handle('wa-service:status', () => serviceStatus());
   ipcMain.handle('wa-service:start', () => startLocalService());
   ipcMain.handle('wa-service:stop', () => stopLocalService());
+  ipcMain.handle('smsbower:status', () => {
+    const config = publicConfig();
+    return {
+      configured: config.smsbower.configured,
+      config: config.smsbower,
+    };
+  });
+  ipcMain.handle('smsbower:balance', () => getSMSBowerClient().getBalance());
+  ipcMain.handle('smsbower:countries', () => getSMSBowerClient().getCountries());
+  ipcMain.handle('smsbower:prices', (_event, input?: SMSBowerPriceInput) => {
+    const config = readConfig();
+    const country = input?.country || config.smsbower.country;
+    if (!country) throw new Error('SMSBower country is not configured');
+    return getSMSBowerClient(config).getPrices(country, smsbowerWhatsAppService);
+  });
+  ipcMain.handle('smsbower:number', (_event, input?: SMSBowerNumberInput) => {
+    const config = readConfig();
+    const country = input?.country || config.smsbower.country;
+    const maxPrice = Number(input?.maxPrice ?? config.smsbower.maxPrice);
+    if (!country) throw new Error('SMSBower country is not configured');
+    if (!Number.isFinite(maxPrice) || maxPrice <= 0) throw new Error('SMSBower max price is not configured');
+    return getSMSBowerClient(config).getNumber({ country, maxPrice, service: smsbowerWhatsAppService });
+  });
+  ipcMain.handle('smsbower:get-status', (_event, id: string) => getSMSBowerClient().getStatus(id));
+  ipcMain.handle('smsbower:set-status', (_event, input: SMSBowerSetStatusInput) => getSMSBowerClient().setStatus(input.id, input.status));
   createWindow();
 });
 

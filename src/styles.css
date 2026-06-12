@@ -295,6 +295,17 @@ button { cursor: pointer; }
 .check-row input { width: auto; min-height: auto; }
 .inline-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .security-status, .service-card { display: grid; gap: 10px; color: #4b5563; margin-bottom: 12px; }
+.settings-subsection, .platform-register { display: grid; gap: 12px; border-top: 1px solid #edf0f4; padding-top: 12px; }
+.platform-stats { display: flex; gap: 8px; flex-wrap: wrap; }
+.platform-stats span {
+  border: 1px solid #dfe4eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 6px 9px;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 700;
+}
 .json-box {
   max-height: 280px;
   overflow: auto;
