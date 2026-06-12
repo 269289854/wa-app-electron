@@ -244,7 +244,7 @@ function createWindow() {
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
   if (devServerUrl) {
     void mainWindow.loadURL(devServerUrl);
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
+    if (process.env.WA_APP_OPEN_DEVTOOLS === '1') mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
     void mainWindow.loadFile(join(app.getAppPath(), 'dist', 'index.html'));
   }
