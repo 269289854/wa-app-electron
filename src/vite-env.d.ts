@@ -70,6 +70,25 @@ type SMSBowerPrice = {
   count: number;
 };
 
+type OpenAIPhoneCheckInput = {
+  requestId: string;
+  phoneNumber: string;
+  countryCallingCode?: string;
+  nationalNumber?: string;
+  countryIso2?: string;
+  mode?: 'page' | 'api';
+  timeoutMs?: number;
+};
+
+type OpenAIPhoneCheckResult = {
+  requestId: string;
+  phoneNumber?: string;
+  status: 'used' | 'sent' | 'available' | 'error';
+  message: string;
+  code?: string;
+  raw?: unknown;
+};
+
 interface Window {
   waConfig: {
     get(): Promise<ClientConfig>;
@@ -79,6 +98,10 @@ interface Window {
   waApi: {
     request<T>(input: { path: string; method?: string; body?: unknown; headers?: Record<string, string>; timeoutMs?: number }): Promise<T>;
     fetchAsset(path: string): Promise<AssetResponse>;
+  };
+  openAIPhone: {
+    bridgeStatus(): Promise<{ running: boolean; port: number; baseUrl: string; pending: number }>;
+    check(input: OpenAIPhoneCheckInput): Promise<OpenAIPhoneCheckResult>;
   };
   waService: {
     status(): Promise<ServiceStatus>;
@@ -105,6 +128,10 @@ interface Window {
     waApi: {
       request<T>(input: { path: string; method?: string; body?: unknown; headers?: Record<string, string>; timeoutMs?: number }): Promise<T>;
       fetchAsset(path: string): Promise<AssetResponse>;
+    };
+    openAIPhone: {
+      bridgeStatus(): Promise<{ running: boolean; port: number; baseUrl: string; pending: number }>;
+      check(input: OpenAIPhoneCheckInput): Promise<OpenAIPhoneCheckResult>;
     };
     waService: {
       status(): Promise<ServiceStatus>;

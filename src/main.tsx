@@ -64,6 +64,7 @@ import {
 import { normalizePhoneInput } from './phone-input';
 import { probeStatus, registrationMethods, statusReason } from './result-model';
 import { cancelSMSBowerActivation, type SMSBowerCancelLogEntry } from './smsbower-cancel';
+import { normalizeOpenAIPhoneCheckResult } from './openai-phone-check';
 import { countryDisplayName, filterSMSBowerCountries, normalizeSMSBowerCountries, type SMSBowerCountry } from './smsbower-countries';
 import type { AccountMessage, ClientProfile, WAAccount, WorkflowResponse } from './types';
 
@@ -883,6 +884,26 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
         setCountryCallingCode(normalized.country_calling_code);
         setPhone(normalized.phone);
 
+        const openAIResult = await checkOpenAIPhoneForSMSBower(normalized, setDebugExchanges);
+        if (openAIResult.status === 'used') {
+          cancelReason = 'openai 手机号已被使用';
+          appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check blocked registration', {
+            activationId: number.activationId,
+            phoneNumber: normalized.e164_number,
+            result: openAIResult,
+          }));
+          continue;
+        }
+        if (openAIResult.status === 'error') {
+          cancelReason = openAIResult.message || 'OpenAI phone check failed';
+          appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check failed', {
+            activationId: number.activationId,
+            phoneNumber: normalized.e164_number,
+            result: openAIResult,
+          }));
+          throw new Error(cancelReason);
+        }
+
         const registration = await probeAndRegisterForSMSBower(normalized, setAddAccountStage, setDebugExchanges, setProbe);
         if (!registration.ok) {
           cancelReason = registration.reason || 'WA registration was skipped';
@@ -1275,6 +1296,34 @@ async function probeAndRegisterForSMSBower(
   } catch (error) {
     patchDebugExchange(setDebugExchanges, registerExchange, { ...registerExchange, error: debugError(error) });
     return { ok: false as const, reason: errorMessage(error) };
+  }
+}
+
+async function checkOpenAIPhoneForSMSBower(
+  phoneInput: PhoneInput,
+  setDebugExchanges: React.Dispatch<React.SetStateAction<DebugExchange[]>>,
+) {
+  const requestId = `openai-phone-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const body = {
+    requestId,
+    phoneNumber: phoneInput.e164_number,
+    countryCallingCode: phoneInput.country_calling_code,
+    nationalNumber: phoneInput.phone,
+    countryIso2: phoneInput.country_iso2,
+    mode: 'api' as const,
+    timeoutMs: 120000,
+  };
+  const exchange = debugRequest('OpenAI phone check start', 'openai-phone:check', body);
+  appendDebugExchange(setDebugExchanges, exchange);
+  try {
+    await window.openAIPhone.bridgeStatus();
+    const result = normalizeOpenAIPhoneCheckResult(await window.openAIPhone.check(body));
+    patchDebugExchange(setDebugExchanges, exchange, { ...exchange, response: sanitizeDebugValue(result) });
+    return result;
+  } catch (error) {
+    const result = normalizeOpenAIPhoneCheckResult({ status: 'error', message: errorMessage(error) });
+    patchDebugExchange(setDebugExchanges, exchange, { ...exchange, error: debugError(error) });
+    return result;
   }
 }
 

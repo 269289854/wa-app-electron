@@ -51,6 +51,10 @@ const api = {
     request: (input: unknown) => ipcRenderer.invoke('wa-api:request', input),
     fetchAsset: (path: string) => ipcRenderer.invoke('wa-api:asset', path),
   },
+  openAIPhone: {
+    bridgeStatus: () => ipcRenderer.invoke('openai-phone:bridge-status'),
+    check: (input: unknown) => ipcRenderer.invoke('openai-phone:check', input),
+  },
   waService: {
     status: () => ipcRenderer.invoke('wa-service:status'),
     start: () => ipcRenderer.invoke('wa-service:start'),
@@ -72,5 +76,6 @@ const api = {
 contextBridge.exposeInMainWorld('waDesktop', api);
 contextBridge.exposeInMainWorld('waConfig', api.waConfig);
 contextBridge.exposeInMainWorld('waApi', api.waApi);
+contextBridge.exposeInMainWorld('openAIPhone', api.openAIPhone);
 contextBridge.exposeInMainWorld('waService', api.waService);
 contextBridge.exposeInMainWorld('smsbower', api.smsbower);

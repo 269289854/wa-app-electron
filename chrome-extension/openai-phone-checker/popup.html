@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <style>
+      body { width: 280px; margin: 0; padding: 14px; font-family: system-ui, sans-serif; color: #111827; }
+      h1 { font-size: 15px; margin: 0 0 12px; }
+      label, select, button { width: 100%; box-sizing: border-box; }
+      select, button { margin-top: 6px; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white; }
+      button { background: #111827; color: white; cursor: pointer; }
+      pre { white-space: pre-wrap; background: #f3f4f6; padding: 8px; border-radius: 6px; max-height: 160px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>OpenAI Phone Checker</h1>
+    <label>
+      Check mode
+      <select id="mode">
+        <option value="api">API first</option>
+        <option value="page">Page automation</option>
+      </select>
+    </label>
+    <button id="retry">Check now</button>
+    <pre id="state">Loading...</pre>
+    <script src="popup.js"></script>
+  </body>
+</html>

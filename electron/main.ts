@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, safeStorage } from 'electron';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createServer } from 'node:net';
+import { createServer as createHttpServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,12 +34,38 @@ type ClientConfigPatch = Partial<ClientConfig> & { password?: string; smsbowerAp
 type SMSBowerPriceInput = { country?: string };
 type SMSBowerNumberInput = { country?: string; maxPrice?: number };
 type SMSBowerSetStatusInput = { id: string; status: number };
+type OpenAIPhoneCheckInput = {
+  requestId: string;
+  phoneNumber: string;
+  countryCallingCode?: string;
+  nationalNumber?: string;
+  countryIso2?: string;
+  mode?: 'page' | 'api';
+  timeoutMs?: number;
+};
+type OpenAIPhoneCheckResult = {
+  requestId: string;
+  phoneNumber?: string;
+  status: 'used' | 'sent' | 'available' | 'error';
+  message: string;
+  code?: string;
+  raw?: unknown;
+};
 
 const userDataDirOverride = process.env.WA_APP_ELECTRON_USER_DATA_DIR?.trim();
 if (userDataDirOverride) app.setPath('userData', userDataDirOverride);
 let mainWindow: BrowserWindow | null = null;
 let localProcess: ChildProcessWithoutNullStreams | null = null;
 let localPort = 0;
+let openAIPhoneBridge: HttpServer | null = null;
+const openAIPhoneBridgePort = 17391;
+const openAIPhoneTasks = new Map<string, {
+  input: OpenAIPhoneCheckInput;
+  createdAt: number;
+  resolve: (result: OpenAIPhoneCheckResult) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+}>();
 const electronDir = dirname(fileURLToPath(import.meta.url));
 
 function configPath() {
@@ -245,6 +272,104 @@ function serviceStatus() {
   };
 }
 
+function openAIPhoneBridgeStatus() {
+  return {
+    running: Boolean(openAIPhoneBridge),
+    port: openAIPhoneBridgePort,
+    baseUrl: `http://127.0.0.1:${openAIPhoneBridgePort}`,
+    pending: openAIPhoneTasks.size,
+  };
+}
+
+function startOpenAIPhoneBridge() {
+  if (openAIPhoneBridge) return openAIPhoneBridgeStatus();
+  openAIPhoneBridge = createHttpServer((request, response) => {
+    void handleOpenAIPhoneBridgeRequest(request, response);
+  });
+  openAIPhoneBridge.once('error', (error) => {
+    openAIPhoneBridge = null;
+    console.error('OpenAI phone bridge failed:', error);
+  });
+  openAIPhoneBridge.listen(openAIPhoneBridgePort, '127.0.0.1');
+  return openAIPhoneBridgeStatus();
+}
+
+function stopOpenAIPhoneBridge() {
+  if (!openAIPhoneBridge) return;
+  openAIPhoneBridge.close();
+  openAIPhoneBridge = null;
+}
+
+async function waitForOpenAIPhoneCheck(input: OpenAIPhoneCheckInput) {
+  startOpenAIPhoneBridge();
+  const timeoutMs = input.timeoutMs || 120000;
+  return new Promise<OpenAIPhoneCheckResult>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      openAIPhoneTasks.delete(input.requestId);
+      reject(new Error('OpenAI phone check timed out'));
+    }, timeoutMs);
+    openAIPhoneTasks.set(input.requestId, {
+      input: { ...input, mode: input.mode || 'api' },
+      createdAt: Date.now(),
+      resolve,
+      reject,
+      timer,
+    });
+  });
+}
+
+async function handleOpenAIPhoneBridgeRequest(request: IncomingMessage, response: ServerResponse) {
+  setBridgeCorsHeaders(response);
+  if (request.method === 'OPTIONS') {
+    response.writeHead(204);
+    response.end();
+    return;
+  }
+  const url = new URL(request.url || '/', `http://127.0.0.1:${openAIPhoneBridgePort}`);
+  try {
+    if (request.method === 'GET' && url.pathname === '/openai-phone-check/task') {
+      const task = [...openAIPhoneTasks.values()].sort((left, right) => left.createdAt - right.createdAt)[0];
+      writeJSON(response, 200, { task: task?.input || null });
+      return;
+    }
+    if (request.method === 'POST' && url.pathname === '/openai-phone-check/result') {
+      const result = await readJSON<OpenAIPhoneCheckResult>(request);
+      const requestId = String(result.requestId || '');
+      const task = openAIPhoneTasks.get(requestId);
+      if (!task) {
+        writeJSON(response, 404, { ok: false, error: 'OpenAI phone check request was not found' });
+        return;
+      }
+      clearTimeout(task.timer);
+      openAIPhoneTasks.delete(requestId);
+      task.resolve(result);
+      writeJSON(response, 200, { ok: true });
+      return;
+    }
+    writeJSON(response, 404, { ok: false, error: 'Not found' });
+  } catch (error) {
+    writeJSON(response, 500, { ok: false, error: errorMessage(error) });
+  }
+}
+
+function setBridgeCorsHeaders(response: ServerResponse) {
+  response.setHeader('Access-Control-Allow-Origin', '*');
+  response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  response.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+}
+
+function writeJSON(response: ServerResponse, status: number, body: unknown) {
+  response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  response.end(JSON.stringify(body));
+}
+
+async function readJSON<T>(request: IncomingMessage) {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  const text = Buffer.concat(chunks).toString('utf8');
+  return (text ? JSON.parse(text) : {}) as T;
+}
+
 function createWindow() {
   const config = readConfig();
   const state = normalizeWindowState(config.windowState);
@@ -309,6 +434,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('wa-config:test', (_event, input?: ClientConfigPatch) => testConnection(input));
   ipcMain.handle('wa-api:request', (_event, input: ApiRequestInput) => requestJSON(input));
   ipcMain.handle('wa-api:asset', (_event, path: string) => requestAsset(path));
+  ipcMain.handle('openai-phone:bridge-status', () => startOpenAIPhoneBridge());
+  ipcMain.handle('openai-phone:check', (_event, input: OpenAIPhoneCheckInput) => waitForOpenAIPhoneCheck(input));
   ipcMain.handle('wa-service:status', () => serviceStatus());
   ipcMain.handle('wa-service:start', () => startLocalService());
   ipcMain.handle('wa-service:stop', () => stopLocalService());
@@ -342,6 +469,7 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   stopLocalService();
+  stopOpenAIPhoneBridge();
   if (process.platform !== 'darwin') app.quit();
 });
 
