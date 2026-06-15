@@ -832,17 +832,24 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
       numberIntervalSeconds: config.numberIntervalSeconds,
     }));
     const prices = await window.smsbower.getPrices({ country: config.country });
+    const inRangePrices = filterSMSBowerPrices(prices, config);
+    const providerIds = inRangePrices.map((item) => item.providerId).filter((id): id is string => Boolean(id));
     appendDebugExchange(setDebugExchanges, debugInfo('SMSBower prices', {
       country: config.country,
       service: 'wa',
       minPrice: config.minPrice,
       maxPrice: config.maxPrice,
       availablePrices: prices,
-      inRangePrices: prices.filter((item) => item.count > 0 && item.cost >= config.minPrice && item.cost <= config.maxPrice),
+      inRangePrices,
     }));
     const price = selectSMSBowerPrice(prices, config);
     if (!price) throw new Error(smsbowerPriceErrorMessage(prices, config));
-    appendDebugExchange(setDebugExchanges, debugInfo('SMSBower price ok', price));
+    appendDebugExchange(setDebugExchanges, debugInfo('SMSBower price ok', {
+      selectedProviders: providerIds,
+      minCost: price.cost,
+      totalCount: inRangePrices.reduce((total, item) => total + item.count, 0),
+      prices: inRangePrices,
+    }));
 
     let successes = 0;
     let orders = 0;
@@ -859,11 +866,12 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
       }
       orders += 1;
       setPlatformState((state) => ({ ...state, stage: 'number', orders, message: `Buying number ${orders}/${config.maxOrders}` }));
-      const numberExchange = debugRequest('SMSBower getNumber', 'smsbower:getNumber', { country: config.country, service: 'wa', maxPrice: config.maxPrice });
+      const numberRequest = { country: config.country, service: 'wa', minPrice: config.minPrice, maxPrice: config.maxPrice, providerIds };
+      const numberExchange = debugRequest('SMSBower getNumber', 'smsbower:getNumber', numberRequest);
       appendDebugExchange(setDebugExchanges, numberExchange);
       let number: SMSBowerNumberResult;
       try {
-        number = await window.smsbower.getNumber({ country: config.country, maxPrice: config.maxPrice });
+        number = await window.smsbower.getNumber({ country: config.country, minPrice: config.minPrice, maxPrice: config.maxPrice, providerIds });
         patchDebugExchange(setDebugExchanges, numberExchange, { ...numberExchange, response: sanitizeDebugValue(number) });
       } catch (error) {
         patchDebugExchange(setDebugExchanges, numberExchange, { ...numberExchange, error: debugError(error) });
@@ -1351,9 +1359,12 @@ async function checkOpenAIPhoneForSMSBower(
 }
 
 function selectSMSBowerPrice(prices: SMSBowerPrice[], config: SMSBowerPublicConfig) {
-  return prices
-    .filter((item) => item.count > 0 && item.cost >= config.minPrice && item.cost <= config.maxPrice)
+  return filterSMSBowerPrices(prices, config)
     .sort((left, right) => left.cost - right.cost)[0] || null;
+}
+
+function filterSMSBowerPrices(prices: SMSBowerPrice[], config: SMSBowerPublicConfig) {
+  return prices.filter((item) => item.count > 0 && item.cost >= config.minPrice && item.cost <= config.maxPrice);
 }
 
 function smsbowerPriceErrorMessage(prices: SMSBowerPrice[], config: SMSBowerPublicConfig) {

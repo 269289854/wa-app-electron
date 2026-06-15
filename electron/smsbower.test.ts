@@ -34,6 +34,26 @@ describe('SMSBower helpers', () => {
     expect(prices).toEqual([{ country: '187', service: 'wa', cost: 0.42, count: 7 }]);
   });
 
+  it('normalizes getPricesV3 provider responses', () => {
+    const prices = normalizePrices({
+      16: {
+        wa: {
+          3160: { price: '0.482', count: '16344' },
+          3109: { cost: '0.399', count: '3', provider_id: '3109' },
+        },
+      },
+    }, '16', 'wa');
+    expect(prices.sort((left, right) => left.cost - right.cost)).toEqual([
+      { country: '16', service: 'wa', cost: 0.399, count: 3, providerId: '3109' },
+      { country: '16', service: 'wa', cost: 0.482, count: 16344, providerId: '3160' },
+    ]);
+  });
+
+  it('keeps provider ids from id fields', () => {
+    const prices = normalizePrices({ 16: { wa: [{ id: 1015, price: '1.188', stock: '22' }] } }, '16', 'wa');
+    expect(prices).toEqual([{ country: '16', service: 'wa', cost: 1.188, count: 22, providerId: '1015' }]);
+  });
+
   it('ignores prices for non-requested services', () => {
     const prices = normalizePrices({ 187: { wa: { cost: '0.42', count: '7' }, tg: { cost: '0.01', count: '99' } } }, '187', 'wa');
     expect(prices).toEqual([{ country: '187', service: 'wa', cost: 0.42, count: 7 }]);
@@ -65,5 +85,29 @@ describe('SMSBower helpers', () => {
     expect(url.searchParams.get('id')).toBe('12345');
     expect(url.searchParams.get('status')).toBe('8');
     expect(url.searchParams.get('api_key')).toBe('secret');
+  });
+
+  it('sends getNumber requests with price bounds and provider ids', async () => {
+    let requestedUrl = '';
+    const client = new SMSBowerClient({
+      apiKey: 'secret',
+      fetcher: (async (url) => {
+        requestedUrl = String(url);
+        return new Response('ACCESS_NUMBER:12345:447523175819');
+      }) as typeof fetch,
+    });
+
+    await expect(client.getNumber({ country: '16', minPrice: 0.1, maxPrice: 0.5, providerIds: ['3160', '3109'] })).resolves.toEqual({
+      activationId: '12345',
+      phone: '447523175819',
+    });
+
+    const url = new URL(requestedUrl);
+    expect(url.searchParams.get('action')).toBe('getNumber');
+    expect(url.searchParams.get('country')).toBe('16');
+    expect(url.searchParams.get('service')).toBe('wa');
+    expect(url.searchParams.get('minPrice')).toBe('0.1');
+    expect(url.searchParams.get('maxPrice')).toBe('0.5');
+    expect(url.searchParams.get('providerIds')).toBe('3160,3109');
   });
 });

@@ -17,6 +17,7 @@ export type SMSBowerPrice = {
   service: string;
   cost: number;
   count: number;
+  providerId?: string;
 };
 
 export type SMSBowerClientOptions = {
@@ -42,17 +43,21 @@ export class SMSBowerClient {
   }
 
   async getPrices(country: string, service = smsbowerWhatsAppService) {
-    const data = await this.requestJSON<unknown>({ action: 'getPrices', country, service });
+    const data = await this.requestJSON<unknown>({ action: 'getPricesV3', country, service });
     return normalizePrices(data, country, service);
   }
 
-  async getNumber(input: { country: string; maxPrice: number; service?: string }) {
-    const raw = await this.requestText({
+  async getNumber(input: { country: string; maxPrice: number; minPrice?: number; providerIds?: string[]; service?: string }) {
+    const params: Record<string, string> = {
       action: 'getNumber',
       service: input.service || smsbowerWhatsAppService,
       country: input.country,
       maxPrice: String(input.maxPrice),
-    });
+    };
+    if (Number.isFinite(input.minPrice) && Number(input.minPrice) > 0) params.minPrice = String(input.minPrice);
+    const providerIds = (input.providerIds || []).map((id) => String(id).trim()).filter(Boolean);
+    if (providerIds.length) params.providerIds = providerIds.join(',');
+    const raw = await this.requestText(params);
     return parseNumberResponse(raw);
   }
 
@@ -108,10 +113,10 @@ export function normalizePrices(data: unknown, requestedCountry: string, request
   return prices;
 }
 
-function collectPrices(value: unknown, prices: SMSBowerPrice[], country: string, service: string, requestedService = service) {
+function collectPrices(value: unknown, prices: SMSBowerPrice[], country: string, service: string, requestedService = service, providerId = '') {
   if (!value || typeof value !== 'object') return;
   if (Array.isArray(value)) {
-    for (const item of value) collectPrices(item, prices, country, service, requestedService);
+    for (const item of value) collectPrices(item, prices, country, service, requestedService, providerId);
     return;
   }
   const record = value as Record<string, unknown>;
@@ -129,14 +134,28 @@ function collectPrices(value: unknown, prices: SMSBowerPrice[], country: string,
       ?? record.numbers
       ?? 0,
     );
-    if (Number.isFinite(cost)) prices.push({ country, service, cost, count: Number.isFinite(count) ? count : 0 });
+    const resolvedProviderId = stringValue(record.provider_id ?? record.providerId ?? record.id) || providerId || undefined;
+    if (Number.isFinite(cost)) prices.push({ country, service, cost, count: Number.isFinite(count) ? count : 0, providerId: resolvedProviderId });
   }
   for (const [key, nested] of Object.entries(record)) {
-    const nextCountry = /^\d+$/.test(key) ? key : country;
-    if (key !== requestedService && key !== nextCountry && hasPriceShape(nested)) continue;
+    const nestedHasDirectPrice = hasDirectPriceShape(nested);
+    const keyIsProvider = /^\d+$/.test(key) && key !== requestedService && nestedHasDirectPrice;
+    const nextCountry = /^\d+$/.test(key) && !keyIsProvider ? key : country;
+    if (key !== requestedService && key !== nextCountry && !keyIsProvider && hasPriceShape(nested)) continue;
     const nextService = key === requestedService ? key : service;
-    collectPrices(nested, prices, nextCountry, nextService, requestedService);
+    const nextProviderId = key !== requestedService && key !== nextCountry && /^\d+$/.test(key) ? key : providerId;
+    collectPrices(nested, prices, nextCountry, nextService, requestedService, nextProviderId);
   }
+}
+
+function hasDirectPriceShape(value: unknown) {
+  return Boolean(value && typeof value === 'object' && ('cost' in (value as Record<string, unknown>) || 'price' in (value as Record<string, unknown>)));
+}
+
+function stringValue(value: unknown) {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return '';
 }
 
 function hasPriceShape(value: unknown) {

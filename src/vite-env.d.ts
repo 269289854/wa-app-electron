@@ -69,6 +69,7 @@ type SMSBowerPrice = {
   service: string;
   cost: number;
   count: number;
+  providerId?: string;
 };
 
 type OpenAIPhoneCheckInput = {
@@ -114,7 +115,7 @@ interface Window {
     getBalance(): Promise<string>;
     getCountries(): Promise<unknown>;
     getPrices(input?: { country?: string }): Promise<SMSBowerPrice[]>;
-    getNumber(input?: { country?: string; maxPrice?: number }): Promise<SMSBowerNumberResult>;
+    getNumber(input?: { country?: string; minPrice?: number; maxPrice?: number; providerIds?: string[] }): Promise<SMSBowerNumberResult>;
     getStatus(id: string): Promise<SMSBowerStatusResult>;
     setStatus(input: { id: string; status: number }): Promise<string>;
     startRegistrationTask?(input?: unknown): Promise<{ successes: number; orders: number; stopped: boolean }>;
@@ -144,7 +145,7 @@ interface Window {
       getBalance(): Promise<string>;
       getCountries(): Promise<unknown>;
       getPrices(input?: { country?: string }): Promise<SMSBowerPrice[]>;
-      getNumber(input?: { country?: string; maxPrice?: number }): Promise<SMSBowerNumberResult>;
+      getNumber(input?: { country?: string; minPrice?: number; maxPrice?: number; providerIds?: string[] }): Promise<SMSBowerNumberResult>;
       getStatus(id: string): Promise<SMSBowerStatusResult>;
       setStatus(input: { id: string; status: number }): Promise<string>;
       startRegistrationTask?(input?: unknown): Promise<{ successes: number; orders: number; stopped: boolean }>;

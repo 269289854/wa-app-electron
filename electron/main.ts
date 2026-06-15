@@ -32,7 +32,7 @@ type ApiRequestInput = {
 type ClientConfigPatch = Partial<ClientConfig> & { password?: string; smsbowerApiKey?: string };
 
 type SMSBowerPriceInput = { country?: string };
-type SMSBowerNumberInput = { country?: string; maxPrice?: number };
+type SMSBowerNumberInput = { country?: string; minPrice?: number; maxPrice?: number; providerIds?: string[] };
 type SMSBowerSetStatusInput = { id: string; status: number };
 type OpenAIPhoneCheckInput = {
   requestId: string;
@@ -457,10 +457,11 @@ app.whenReady().then(async () => {
   ipcMain.handle('smsbower:number', (_event, input?: SMSBowerNumberInput) => {
     const config = readConfig();
     const country = input?.country || config.smsbower.country;
+    const minPrice = Number(input?.minPrice ?? config.smsbower.minPrice);
     const maxPrice = Number(input?.maxPrice ?? config.smsbower.maxPrice);
     if (!country) throw new Error('SMSBower country is not configured');
     if (!Number.isFinite(maxPrice) || maxPrice <= 0) throw new Error('SMSBower max price is not configured');
-    return getSMSBowerClient(config).getNumber({ country, maxPrice, service: smsbowerWhatsAppService });
+    return getSMSBowerClient(config).getNumber({ country, minPrice, maxPrice, providerIds: input?.providerIds, service: smsbowerWhatsAppService });
   });
   ipcMain.handle('smsbower:get-status', (_event, id: string) => getSMSBowerClient().getStatus(id));
   ipcMain.handle('smsbower:set-status', (_event, input: SMSBowerSetStatusInput) => getSMSBowerClient().setStatus(input.id, input.status));
