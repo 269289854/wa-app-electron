@@ -10,7 +10,7 @@ describe('OpenAI phone check result normalization', () => {
       code: 'phone_number_in_use',
     })).toMatchObject({
       status: 'used',
-      message: 'openai 手机号已被使用',
+      message: 'openai \u624b\u673a\u53f7\u5df2\u88ab\u4f7f\u7528',
       code: 'phone_number_in_use',
     });
   });
@@ -22,7 +22,7 @@ describe('OpenAI phone check result normalization', () => {
   });
 
   it('marks Chinese used messages as used', () => {
-    expect(normalizeOpenAIPhoneCheckResult({ message: '该电话号码已被使用。请使用其他电话号码。' })).toMatchObject({
+    expect(normalizeOpenAIPhoneCheckResult({ message: '\u8be5\u7535\u8bdd\u53f7\u7801\u5df2\u88ab\u4f7f\u7528\u3002\u8bf7\u4f7f\u7528\u5176\u4ed6\u7535\u8bdd\u53f7\u7801\u3002' })).toMatchObject({
       status: 'used',
     });
   });

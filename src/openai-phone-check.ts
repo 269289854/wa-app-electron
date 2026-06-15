@@ -9,6 +9,8 @@ export type OpenAIPhoneCheckResult = {
   raw?: unknown;
 };
 
+const PHONE_USED_MESSAGE = 'openai \u624b\u673a\u53f7\u5df2\u88ab\u4f7f\u7528';
+
 export function normalizeOpenAIPhoneCheckResult(input: unknown): OpenAIPhoneCheckResult {
   const record = asRecord(input);
   const raw = record.raw ?? input;
@@ -22,16 +24,16 @@ export function normalizeOpenAIPhoneCheckResult(input: unknown): OpenAIPhoneChec
     code === 'phone_number_in_use'
     || combined.includes('phone_number_in_use')
     || combined.includes('phone number already in use')
-    || combined.includes('电话号码已被使用')
-    || combined.includes('电话号码已经被使用')
-    || combined.includes('该电话号码已被使用')
-    || combined.includes('该电话号码已经被使用')
+    || combined.includes('\u7535\u8bdd\u53f7\u7801\u5df2\u88ab\u4f7f\u7528')
+    || combined.includes('\u7535\u8bdd\u53f7\u7801\u5df2\u7ecf\u88ab\u4f7f\u7528')
+    || combined.includes('\u8be5\u7535\u8bdd\u53f7\u7801\u5df2\u88ab\u4f7f\u7528')
+    || combined.includes('\u8be5\u7535\u8bdd\u53f7\u7801\u5df2\u7ecf\u88ab\u4f7f\u7528')
   ) {
     return {
       requestId: stringValue(record.requestId),
       phoneNumber: stringValue(record.phoneNumber || rawRecord.phoneNumber || rawRecord.phone_number),
       status: 'used',
-      message: 'openai 手机号已被使用',
+      message: PHONE_USED_MESSAGE,
       code: code || 'phone_number_in_use',
       raw,
     };

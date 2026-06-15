@@ -21,6 +21,7 @@ export type SMSBowerPublicConfig = {
   targetSuccessCount: number;
   maxOrders: number;
   numberIntervalSeconds: number;
+  openAIPhoneCheckEnabled: boolean;
   pollIntervalSeconds: number;
   otpTimeoutSeconds: number;
   hasApiKey: boolean;
@@ -91,6 +92,7 @@ export function defaultSMSBowerConfig(): SMSBowerStoredConfig {
     targetSuccessCount: 1,
     maxOrders: 3,
     numberIntervalSeconds: 0,
+    openAIPhoneCheckEnabled: false,
     pollIntervalSeconds: 5,
     otpTimeoutSeconds: 600,
   };
@@ -106,6 +108,7 @@ export function normalizeSMSBowerConfig(config?: Partial<SMSBowerStoredConfig>):
     targetSuccessCount: boundedNumber(config?.targetSuccessCount, 1, 100, fallback.targetSuccessCount),
     maxOrders: boundedNumber(config?.maxOrders, 1, 1000, fallback.maxOrders),
     numberIntervalSeconds: boundedNumber(config?.numberIntervalSeconds, 0, 3600, fallback.numberIntervalSeconds),
+    openAIPhoneCheckEnabled: Boolean(config?.openAIPhoneCheckEnabled),
     pollIntervalSeconds: boundedNumber(config?.pollIntervalSeconds, 2, 120, fallback.pollIntervalSeconds),
     otpTimeoutSeconds: boundedNumber(config?.otpTimeoutSeconds, 30, 3600, fallback.otpTimeoutSeconds),
     encryptedApiKey: config?.encryptedApiKey,
@@ -148,6 +151,7 @@ export function publicSMSBowerConfig(config: SMSBowerStoredConfig): SMSBowerPubl
     targetSuccessCount: config.targetSuccessCount,
     maxOrders: config.maxOrders,
     numberIntervalSeconds: config.numberIntervalSeconds,
+    openAIPhoneCheckEnabled: config.openAIPhoneCheckEnabled,
     pollIntervalSeconds: config.pollIntervalSeconds,
     otpTimeoutSeconds: config.otpTimeoutSeconds,
     hasApiKey,

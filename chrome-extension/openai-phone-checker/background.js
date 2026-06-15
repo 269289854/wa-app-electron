@@ -50,6 +50,7 @@ async function pollTask() {
 async function runTask(task) {
   const tab = await findOrCreateAddPhoneTab();
   try {
+    await ensureContentScript(tab.id);
     const response = await chrome.tabs.sendMessage(tab.id, { type: 'openai-phone-check', task });
     return normalizeResult(response);
   } catch (error) {
@@ -59,8 +60,42 @@ async function runTask(task) {
 
 async function findOrCreateAddPhoneTab() {
   const tabs = await chrome.tabs.query({ url: 'https://auth.openai.com/add-phone*' });
-  if (tabs[0]?.id) return tabs[0];
-  return chrome.tabs.create({ url: 'https://auth.openai.com/add-phone', active: true });
+  const tab = tabs[0]?.id ? tabs[0] : await chrome.tabs.create({ url: 'https://auth.openai.com/add-phone', active: true });
+  if (!tab.id) throw new Error('OpenAI add-phone tab was not available');
+  await waitForTabReady(tab.id);
+  return tab;
+}
+
+async function waitForTabReady(tabId) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.status === 'complete' && tab.url?.startsWith('https://auth.openai.com/add-phone')) return;
+    await sleep(250);
+  }
+  throw new Error('OpenAI add-phone page did not finish loading');
+}
+
+async function ensureContentScript(tabId) {
+  try {
+    const pong = await chrome.tabs.sendMessage(tabId, { type: 'openai-phone-check-ping' });
+    if (pong?.ok) return;
+  } catch {
+    // The content script is not present yet; inject it below.
+  }
+  await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      const pong = await chrome.tabs.sendMessage(tabId, { type: 'openai-phone-check-ping' });
+      if (pong?.ok) return;
+    } catch {
+      await sleep(100);
+    }
+  }
+  throw new Error('OpenAI phone checker content script is not available');
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function reportResult(result) {

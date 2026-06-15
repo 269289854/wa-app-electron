@@ -21,6 +21,7 @@ type SMSBowerPublicConfig = {
   targetSuccessCount: number;
   maxOrders: number;
   numberIntervalSeconds: number;
+  openAIPhoneCheckEnabled: boolean;
   pollIntervalSeconds: number;
   otpTimeoutSeconds: number;
   hasApiKey: boolean;

@@ -884,27 +884,13 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
         setCountryCallingCode(normalized.country_calling_code);
         setPhone(normalized.phone);
 
-        const openAIResult = await checkOpenAIPhoneForSMSBower(normalized, setDebugExchanges);
-        if (openAIResult.status === 'used') {
-          cancelReason = 'openai 手机号已被使用';
-          appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check blocked registration', {
-            activationId: number.activationId,
-            phoneNumber: normalized.e164_number,
-            result: openAIResult,
-          }));
-          continue;
-        }
-        if (openAIResult.status === 'error') {
-          cancelReason = openAIResult.message || 'OpenAI phone check failed';
-          appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check failed', {
-            activationId: number.activationId,
-            phoneNumber: normalized.e164_number,
-            result: openAIResult,
-          }));
-          throw new Error(cancelReason);
-        }
-
-        const registration = await probeAndRegisterForSMSBower(normalized, setAddAccountStage, setDebugExchanges, setProbe);
+        const registration = await probeAndRegisterForSMSBower(
+          normalized,
+          config.openAIPhoneCheckEnabled,
+          setAddAccountStage,
+          setDebugExchanges,
+          setProbe,
+        );
         if (!registration.ok) {
           cancelReason = registration.reason || 'WA registration was skipped';
           appendDebugExchange(setDebugExchanges, debugInfo('SMSBower WA registration skipped', {
@@ -989,13 +975,14 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
       if (!probeResultStatus.canRegister) {
         throw new Error(statusReason(probeResultStatus) || '探测未通过，未发起注册。');
       }
-      const openAIResult = await checkOpenAIPhoneForSMSBower(phoneInput, setDebugExchanges);
+      const smsbowerConfig = configQuery.data?.smsbower || (await window.waConfig.get()).smsbower;
+      const openAIResult = await checkOpenAIPhoneForSMSBower(phoneInput, setDebugExchanges, smsbowerConfig.openAIPhoneCheckEnabled);
       if (openAIResult.status === 'used') {
         appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check blocked registration', {
           phoneNumber: phoneInput.e164_number,
           result: openAIResult,
         }));
-        throw new Error('openai 手机号已被使用');
+        throw new Error('openai \u624b\u673a\u53f7\u5df2\u88ab\u4f7f\u7528');
       }
       if (openAIResult.status === 'error') {
         appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check failed', {
@@ -1231,7 +1218,7 @@ type SettingsForm = {
   smsbowerApiKey: string;
   smsbower: Pick<
     SMSBowerPublicConfig,
-    'enabled' | 'country' | 'minPrice' | 'maxPrice' | 'targetSuccessCount' | 'maxOrders' | 'numberIntervalSeconds' | 'pollIntervalSeconds' | 'otpTimeoutSeconds'
+    'enabled' | 'country' | 'minPrice' | 'maxPrice' | 'targetSuccessCount' | 'maxOrders' | 'numberIntervalSeconds' | 'openAIPhoneCheckEnabled' | 'pollIntervalSeconds' | 'otpTimeoutSeconds'
   >;
 };
 
@@ -1280,6 +1267,7 @@ function debugInfo(label: string, body: unknown): DebugExchange {
 
 async function probeAndRegisterForSMSBower(
   phoneInput: PhoneInput,
+  openAIPhoneCheckEnabled: boolean,
   setStage: React.Dispatch<React.SetStateAction<'idle' | 'probe' | 'register'>>,
   setDebugExchanges: React.Dispatch<React.SetStateAction<DebugExchange[]>>,
   setProbe: React.Dispatch<React.SetStateAction<WorkflowResponse | null>>,
@@ -1299,6 +1287,22 @@ async function probeAndRegisterForSMSBower(
   const currentStatus = probeStatus(probeResponse);
   if (!currentStatus.canRegister) return { ok: false as const, reason: statusReason(currentStatus) || '号码探测未通过' };
 
+  const openAIResult = await checkOpenAIPhoneForSMSBower(phoneInput, setDebugExchanges, openAIPhoneCheckEnabled);
+  if (openAIResult.status === 'used') {
+    appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check blocked registration', {
+      phoneNumber: phoneInput.e164_number,
+      result: openAIResult,
+    }));
+    return { ok: false as const, reason: 'openai \u624b\u673a\u53f7\u5df2\u88ab\u4f7f\u7528' };
+  }
+  if (openAIResult.status === 'error') {
+    appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check failed', {
+      phoneNumber: phoneInput.e164_number,
+      result: openAIResult,
+    }));
+    return { ok: false as const, reason: openAIResult.message || 'OpenAI phone check failed' };
+  }
+
   const registerBody = { ...phoneInput, delivery_method: 'sms' };
   const registerExchange = debugRequest('发起注册', '/api/wa/register', registerBody);
   setStage('register');
@@ -1317,7 +1321,11 @@ async function probeAndRegisterForSMSBower(
 async function checkOpenAIPhoneForSMSBower(
   phoneInput: PhoneInput,
   setDebugExchanges: React.Dispatch<React.SetStateAction<DebugExchange[]>>,
+  enabled: boolean,
 ) {
+  if (!enabled) {
+    return normalizeOpenAIPhoneCheckResult({ status: 'available', message: 'OpenAI phone check disabled' });
+  }
   const requestId = `openai-phone-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const body = {
     requestId,
@@ -1498,6 +1506,10 @@ function SMSBowerSettingsFields({
         <input checked={form.smsbower.enabled} onChange={(event) => updateSMSBower({ enabled: event.target.checked })} type="checkbox" />
         启用 SMSBower 平台注册
       </label>
+      <label className="check-row">
+        <input checked={form.smsbower.openAIPhoneCheckEnabled} onChange={(event) => updateSMSBower({ openAIPhoneCheckEnabled: event.target.checked })} type="checkbox" />
+        注册前检查 OpenAI 手机号占用
+      </label>
       <label>
         SMSBower API Key
         <input
@@ -1607,6 +1619,7 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
       targetSuccessCount: 1,
       maxOrders: 3,
       numberIntervalSeconds: 0,
+      openAIPhoneCheckEnabled: false,
       pollIntervalSeconds: 5,
       otpTimeoutSeconds: 600,
     },
@@ -1627,6 +1640,7 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
         targetSuccessCount: configQuery.data.smsbower.targetSuccessCount,
         maxOrders: configQuery.data.smsbower.maxOrders,
         numberIntervalSeconds: configQuery.data.smsbower.numberIntervalSeconds,
+        openAIPhoneCheckEnabled: configQuery.data.smsbower.openAIPhoneCheckEnabled,
         pollIntervalSeconds: configQuery.data.smsbower.pollIntervalSeconds,
         otpTimeoutSeconds: configQuery.data.smsbower.otpTimeoutSeconds,
       },

@@ -32,7 +32,7 @@ describe('electron config helpers', () => {
     expect(config.mode).toBe('remote');
     expect(config.remoteBaseUrl).toBe('https://wa.yizhimeng.uk');
     expect(config.localDataDir).toContain('wa-app-data');
-    expect(config.smsbower).toMatchObject({ enabled: false, targetSuccessCount: 1, maxOrders: 3, numberIntervalSeconds: 0 });
+    expect(config.smsbower).toMatchObject({ enabled: false, targetSuccessCount: 1, maxOrders: 3, numberIntervalSeconds: 0, openAIPhoneCheckEnabled: false });
     expect(config.windowState).toEqual({ width: 1320, height: 860 });
   });
 
@@ -66,6 +66,7 @@ describe('electron config helpers', () => {
         targetSuccessCount: 1.8,
         maxOrders: 2.2,
         numberIntervalSeconds: 10.6,
+        openAIPhoneCheckEnabled: true,
         pollIntervalSeconds: 4.7,
         otpTimeoutSeconds: 90.2,
       },
@@ -75,6 +76,7 @@ describe('electron config helpers', () => {
     expect(config.smsbower.targetSuccessCount).toBe(2);
     expect(config.smsbower.maxOrders).toBe(2);
     expect(config.smsbower.numberIntervalSeconds).toBe(11);
+    expect(config.smsbower.openAIPhoneCheckEnabled).toBe(true);
     expect(config.smsbower.pollIntervalSeconds).toBe(5);
     expect(config.smsbower.otpTimeoutSeconds).toBe(90);
   });

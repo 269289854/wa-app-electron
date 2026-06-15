@@ -1,4 +1,8 @@
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'openai-phone-check-ping') {
+    sendResponse({ ok: true });
+    return false;
+  }
   if (message?.type !== 'openai-phone-check') return false;
   runOpenAIPhoneCheck(message.task)
     .then(sendResponse)
