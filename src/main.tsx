@@ -989,6 +989,21 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
       if (!probeResultStatus.canRegister) {
         throw new Error(statusReason(probeResultStatus) || '探测未通过，未发起注册。');
       }
+      const openAIResult = await checkOpenAIPhoneForSMSBower(phoneInput, setDebugExchanges);
+      if (openAIResult.status === 'used') {
+        appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check blocked registration', {
+          phoneNumber: phoneInput.e164_number,
+          result: openAIResult,
+        }));
+        throw new Error('openai 手机号已被使用');
+      }
+      if (openAIResult.status === 'error') {
+        appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check failed', {
+          phoneNumber: phoneInput.e164_number,
+          result: openAIResult,
+        }));
+        throw new Error(openAIResult.message || 'OpenAI phone check failed');
+      }
       const registerBody = { ...phoneInput, delivery_method: method };
       const registerExchange = debugRequest('发起注册', '/api/wa/register', registerBody);
       setAddAccountStage('register');
