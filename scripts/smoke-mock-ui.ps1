@@ -113,7 +113,7 @@ const server = http.createServer(async (req, res) => {
   });
   if (path === '/api/wa/messages') return json(res, {
     messages: [
-      { account_message_id: 'msg-1', wa_account_id: accountID, contact_ref: contactID, direction: 'inbound', display_text: 'Mock hello', received_at: '2026-06-12T00:01:00Z', read: false },
+      { account_message_id: 'msg-1', wa_account_id: accountID, contact_ref: contactID, direction: 'inbound', text: { value: 'Mock hello from object text', redacted_value: 'Mock h****************' }, received_at: '2026-06-12T00:01:00Z', read: false },
       { account_message_id: 'msg-2', wa_account_id: accountID, contact_ref: contactID, direction: 'outbound', display_text: 'Mock reply', sent_at: '2026-06-12T00:02:00Z', ack_status: 'sent' },
     ],
   });
@@ -328,7 +328,7 @@ async function main() {
     `);
     if (!loadedMore) throw new Error('Load more accounts action failed');
     checks.accountPagination = await waitForExpression(client, 'document.body.innerText.includes("Pending Account") && Boolean(document.querySelector(".connection-dot.warn"))');
-    checks.chatThread = await waitForExpression(client, 'document.body.innerText.includes("Mock Contact") && document.body.innerText.includes("Mock hello") && document.body.innerText.includes("Mock reply")');
+    checks.chatThread = await waitForExpression(client, 'document.body.innerText.includes("Mock Contact") && document.body.innerText.includes("Mock hello from object text") && document.body.innerText.includes("Mock reply") && !document.body.innerText.includes("[object Object]")');
     await runInPage(client, `
       const setValue = (input, value) => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);

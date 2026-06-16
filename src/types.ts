@@ -89,7 +89,7 @@ export type AccountMessage = {
   wa_account_id?: string;
   contact_ref?: string;
   direction?: string | number;
-  text?: string;
+  text?: unknown;
   preview?: string;
   display_text?: string;
   received_at?: Timestamped;

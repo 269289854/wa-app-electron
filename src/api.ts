@@ -193,7 +193,60 @@ export function normalizeContacts(contacts: WAContact[], messages: AccountMessag
 
 export function messageText(message?: AccountMessage) {
   if (!message) return '';
-  return String(message.display_text || message.text || message.preview || message.message_text || '');
+  return firstMessageText(message.display_text, message.text, message.preview, message.message_text);
+}
+
+const textFieldPriority = [
+  'value',
+  'display_text',
+  'message_text',
+  'body',
+  'text',
+  'message',
+  'content',
+  'caption',
+  'conversation',
+  'redacted_value',
+];
+
+function firstMessageText(...values: unknown[]): string {
+  const seen = new Set<unknown>();
+  for (const value of values) {
+    const text = extractMessageText(value, seen);
+    if (text) return text;
+  }
+  return '';
+}
+
+function extractMessageText(value: unknown, seen: Set<unknown>): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value !== 'object') return '';
+  if (seen.has(value)) return '';
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const text = extractMessageText(item, seen);
+      if (text) return text;
+    }
+    return '';
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const key of textFieldPriority) {
+    const text = extractMessageText(record[key], seen);
+    if (text) return text;
+  }
+  for (const key of Object.keys(record)) {
+    if (textFieldPriority.includes(key)) continue;
+    const nested = record[key];
+    if (!nested || typeof nested !== 'object') continue;
+    const text = extractMessageText(nested, seen);
+    if (text) return text;
+  }
+  return '';
 }
 
 export function messageTime(message: AccountMessage) {
