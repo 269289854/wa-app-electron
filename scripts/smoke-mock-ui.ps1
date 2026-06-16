@@ -34,8 +34,11 @@ const text = (res, value) => {
 
 const accountID = 'wa-account-1';
 const pendingAccountID = 'wa-account-pending';
+const platformAccountID = 'wa-account-platform';
+const verificationRequestID = 'wavrf-smoke-1';
 const contactID = 'contact-1';
 const operations = [];
+let platformOtpSubmitCount = 0;
 
 function readBody(req) {
   return new Promise((resolve) => {
@@ -61,6 +64,12 @@ const server = http.createServer(async (req, res) => {
         status: 'WA_ACCOUNT_STATUS_PENDING_REGISTRATION',
         phone: { e164_number: '+15550100009' },
         audit: { updated_at: '2026-06-12T00:05:00Z' },
+      }, {
+        wa_account_id: platformAccountID,
+        display_name: 'Platform Account',
+        status: 'ACTIVE',
+        phone: { e164_number: '+573145865572' },
+        audit: { updated_at: '2026-06-12T00:06:00Z' },
       }],
     });
     return json(res, {
@@ -128,7 +137,7 @@ const server = http.createServer(async (req, res) => {
     ],
   });
   if (path === '/api/wa/account-settings/2fa/status') return json(res, {
-    status: { configured: true, email_configured: true, email_verified: true, email_address: 'mock@example.com' },
+    status: { configured: true, email_configured: true, email_address: 'mock@example.com' },
   });
   if (path.includes('/profile-picture')) return text(res, '');
   if (req.method === 'POST' || req.method === 'DELETE') {
@@ -141,8 +150,18 @@ const server = http.createServer(async (req, res) => {
       method_statuses: [{ method: 'sms', available: true }],
       phone_status: { sms_available: true },
     });
-    if (path === '/api/wa/register') return json(res, { success: true, status: 'otp_required', wa_account_id: accountID, delivery_method: body.delivery_method || 'sms' });
-    if (path === '/api/wa/actions/registration/resume-otp') return json(res, { success: true, status: 'registered', wa_account_id: body.wa_account_id || accountID });
+    if (path === '/api/wa/register') return json(res, { success: true, status: 'otp_required', wa_account_id: body.e164_number === '+573145865572' ? platformAccountID : accountID, verification_request_id: verificationRequestID, delivery_method: body.delivery_method || 'sms' });
+    if (path === '/api/wa/actions/registration/resume-otp') {
+      if (body.wa_account_id === platformAccountID) {
+        platformOtpSubmitCount += 1;
+        if (platformOtpSubmitCount < 3) {
+          res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: { message: 'wasafe upstream http 502: {"message":"Internal server error"}' } }));
+          return;
+        }
+      }
+      return json(res, { success: true, status: 'registered', wa_account_id: body.wa_account_id || accountID });
+    }
     if (path === '/api/wa/messages/send') return json(res, { success: true, message_id: 'msg-sent' });
     return json(res, { success: true, operation: { status: 'ok' } });
   }
@@ -284,6 +303,18 @@ async function waitForOperationWithDebug(client, path, method = 'POST', timeoutM
   }
 }
 
+async function waitForOperationCount(path, count, method = 'POST', timeoutMs = 15000, afterIndex = 0) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const operations = await getOperations();
+    const matches = operations.slice(afterIndex).filter((operation) => operation.path === path && operation.method === method);
+    if (matches.length >= count) return matches;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  const operations = await getOperations();
+  throw new Error(`Expected ${count} operations for ${method} ${path}; got ${operations.slice(afterIndex).filter((operation) => operation.path === path && operation.method === method).length}; operations=${JSON.stringify(operations.slice(afterIndex))}`);
+}
+
 async function runInPage(client, source, timeoutMs = 30000) {
   try {
     new Function(`return (async () => { ${source} })()`);
@@ -381,9 +412,11 @@ async function main() {
     await route(client, '#/account', 'document.body.innerText.includes("Mock Account") && document.body.innerText.includes("profile-1") && document.body.innerText.includes("SmokeVendor SmokePhone") && document.body.innerText.includes("fdid-1") && document.body.innerText.includes("LTE") && document.body.innerText.includes("123456") && document.body.innerText.includes("connected") && document.body.innerText.includes("US") && Boolean([...document.querySelectorAll(".info-card")].find((card) => card.querySelector(".info-grid"))) && Boolean(document.querySelector("[data-action=refresh-avatar]"))');
     await runInPage(client, `
       const text = document.body.innerText;
+      const pendingEmail = '\u5f85\u9a8c\u8bc1\u90ae\u7bb1';
+      const missingEmail = '\u672a\u663e\u793a\u90ae\u7bb1';
       if (!text.includes('mock@example.com')) throw new Error('Security email address is not visible');
-      if (!text.includes('待验证邮箱')) throw new Error('Pending email status is not visible');
-      if (text.includes('未显示邮箱')) throw new Error('Security panel still shows missing email fallback');
+      if (!text.includes(pendingEmail)) throw new Error('Pending email status is not visible');
+      if (text.includes(missingEmail)) throw new Error('Security panel still shows missing email fallback');
       return true;
     `);
     await runInPage(client, `
@@ -489,9 +522,11 @@ async function main() {
       const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
       const inputs = [...addPage.querySelectorAll('input')].filter((input) => input.offsetParent !== null);
       const accountID = inputs.find((input) => input.placeholder === 'wa_account_id');
+      const verificationRequest = inputs.find((input) => input.placeholder === 'verification_request_id');
       const otp = inputs.find((input) => input.type === 'password');
-      if (!accountID || !otp) throw new Error('Registration OTP inputs not found');
+      if (!accountID || !verificationRequest || !otp) throw new Error('Registration OTP inputs not found');
       setValue(accountID, 'wa-account-1');
+      setValue(verificationRequest, 'wavrf-manual-1');
       setValue(otp, '111222');
       await new Promise((resolve) => setTimeout(resolve, 250));
       const button = otp.closest('.info-card').querySelector('.primary-button');
@@ -501,18 +536,29 @@ async function main() {
     `);
     await waitForOperation('/api/wa/actions/registration/resume-otp', 'POST', 15000, operationsBeforeRegistrationOtp);
     checks.registrationActions = true;
+    const manualOtpOperation = (await getOperations()).slice(operationsBeforeRegistrationOtp).find((operation) => operation.path === '/api/wa/actions/registration/resume-otp');
+    if (manualOtpOperation?.body?.verification_request_id !== 'wavrf-manual-1') throw new Error('Manual OTP submit did not include verification_request_id');
+    const operationsBeforePlatform = (await getOperations()).length;
     await runInPage(client, `
       const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
       const platformCard = [...addPage.querySelectorAll('.info-card')].find((card) => card.querySelector('.platform-register'));
-      const button = platformCard?.querySelector('.primary-button');
+      let button = platformCard?.querySelector('.primary-button');
       for (let index = 0; index < 50 && button?.disabled; index += 1) {
         await new Promise((resolve) => setTimeout(resolve, 100));
+        button = platformCard?.querySelector('.primary-button');
       }
       if (!button || button.disabled) throw new Error('Platform registration button is not ready');
       button.click();
       return true;
     `);
     await waitForExpression(client, 'document.querySelector(".add-page .debug-json")?.innerText.includes("SMSBower start")');
+    await waitForOperationWithDebug(client, '/api/wa/register', 'POST', 15000, operationsBeforePlatform);
+    const platformOtpOperations = await waitForOperationCount('/api/wa/actions/registration/resume-otp', 3, 'POST', 20000, operationsBeforePlatform);
+    if (!platformOtpOperations.every((operation) => operation.body?.verification_request_id === 'wavrf-smoke-1')) throw new Error('Platform OTP submit did not include verification_request_id');
+    checks.platformOtpRetry = true;
+    const cancelledAfterOtp = await evaluate(client, 'Boolean(document.querySelector(".add-page .debug-json")?.innerText.includes(\'"status": 8\'))');
+    if (cancelledAfterOtp) throw new Error('Platform registration cancelled SMSBower order after receiving OTP');
+    checks.platformNoCancelAfterOtp = true;
     await route(client, '#/settings', 'Boolean(document.querySelector(".app-shell[data-view=settings] .settings-page"))');
     await evaluate(client, 'window.smsbower.stopRegistrationTask()');
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -573,6 +619,7 @@ try {
   } | ConvertTo-Json -Compress
   $env:WA_APP_ELECTRON_USER_DATA_DIR = $userData
   $env:WA_APP_ELECTRON_TEST_CONFIG = $configJson
+  $env:WA_APP_ELECTRON_MOCK_SMSBOWER = "1"
   $process = Start-Process -FilePath $exe -ArgumentList "--remote-debugging-port=$DebugPort" -WorkingDirectory $root -PassThru -WindowStyle Hidden
   Start-Sleep -Seconds 8
   if ($process.HasExited) {
@@ -588,6 +635,7 @@ try {
 } finally {
   Remove-Item Env:\WA_APP_ELECTRON_USER_DATA_DIR -ErrorAction SilentlyContinue
   Remove-Item Env:\WA_APP_ELECTRON_TEST_CONFIG -ErrorAction SilentlyContinue
+  Remove-Item Env:\WA_APP_ELECTRON_MOCK_SMSBOWER -ErrorAction SilentlyContinue
   Get-Process | Where-Object { $_.Path -like "*wa-app-electron*WA App.exe*" } | Stop-Process -Force -ErrorAction SilentlyContinue
   if ($mockProcess -and !$mockProcess.HasExited) {
     Stop-Process -Id $mockProcess.Id -Force -ErrorAction SilentlyContinue

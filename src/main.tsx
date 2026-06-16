@@ -42,6 +42,7 @@ import {
   getMessages,
   getOtpMessages,
   getTwoFactorStatus,
+  isTransientOTPSubmitError,
   markMessagesRead,
   messageText,
   messageTime,
@@ -813,6 +814,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
   const stopPlatformRef = useRef(false);
   const [method, setMethod] = useState('sms');
   const [pendingAccountID, setPendingAccountID] = useState('');
+  const [pendingVerificationRequestID, setPendingVerificationRequestID] = useState('');
   const [otp, setOtp] = useState('');
   const input = resolvePhoneInput(phone, countryCallingCode);
   const recognizedPhone = input?.country_iso2 ? `${input.country_iso2} +${input.country_calling_code}` : '';
@@ -897,6 +899,8 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
 
       let completed = false;
       let cancelReason = '';
+      let otpReceived = false;
+      let skipCancel = false;
       try {
         const normalized = normalizePhoneInput(number.phone, '');
         setPlatformState((state) => ({ ...state, stage: 'probe', currentPhone: number.phone, activationId: number.activationId, message: 'Probing WA registration route' }));
@@ -924,28 +928,42 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
           continue;
         }
         const waAccountId = registration.response.wa_account_id || '';
+        const verificationRequestId = registration.response.verification_request_id || '';
         if (!waAccountId) {
           cancelReason = 'WA registration response did not include wa_account_id';
           appendDebugExchange(setDebugExchanges, debugInfo('SMSBower missing wa_account_id', registration.response));
           continue;
         }
         setPendingAccountID(waAccountId);
+        setPendingVerificationRequestID(verificationRequestId);
         setPlatformState((state) => ({ ...state, stage: 'otp', message: 'Waiting for SMSBower OTP code' }));
         const codeResult = await waitForSMSBowerCode(number.activationId, config, setDebugExchanges, stopPlatformRef);
         if (!codeResult.code) {
           cancelReason = codeResult.reason;
           continue;
         }
+        otpReceived = true;
+        setOtp(codeResult.code);
 
         setPlatformState((state) => ({ ...state, stage: 'submit', message: 'Submitting OTP to wa-app' }));
-        const otpExchange = debugRequest('Submit SMSBower OTP', '/api/wa/actions/registration/resume-otp', { wa_account_id: waAccountId, otp: codeResult.code });
-        appendDebugExchange(setDebugExchanges, otpExchange);
         try {
-          const otpResponse = await submitRegistrationOTP(waAccountId, codeResult.code);
-          patchDebugExchange(setDebugExchanges, otpExchange, { ...otpExchange, response: sanitizeDebugValue(otpResponse) });
+          const otpResponse = await submitRegistrationOTPWithRetry({
+            accountID: waAccountId,
+            verificationRequestID: verificationRequestId,
+            otp: codeResult.code,
+            setDebugExchanges,
+            stopRef: stopPlatformRef,
+            label: 'Submit SMSBower OTP',
+            onRetry: (attempt) => setPlatformState((state) => ({
+              ...state,
+              stage: 'submit',
+              message: `OTP submit failed, retrying in 3s (${attempt + 1}/3)`,
+            })),
+          });
           const exists = await confirmAccountAppears(waAccountId);
           if (!exists) throw new Error(otpResponse.error_message || 'OTP submitted but account was not found in the account list');
           completed = true;
+          setOtp('');
           const doneExchange = debugRequest('SMSBower setStatus complete', 'smsbower:setStatus', { id: number.activationId, status: 6 });
           appendDebugExchange(setDebugExchanges, doneExchange);
           try {
@@ -961,14 +979,33 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
           onChanged();
         } catch (error) {
           cancelReason = errorMessage(error);
-          patchDebugExchange(setDebugExchanges, otpExchange, { ...otpExchange, error: debugError(error) });
-          appendDebugExchange(setDebugExchanges, debugInfo('SMSBower OTP submit failed', { activationId: number.activationId, error: cancelReason }));
+          if (isTransientOTPSubmitError(error)) {
+            skipCancel = true;
+            setPlatformState((state) => ({
+              ...state,
+              stage: 'submit',
+              message: 'OTP received, but WA submit failed temporarily. You can retry manually.',
+            }));
+            appendDebugExchange(setDebugExchanges, debugInfo('SMSBower OTP submit transient failed', {
+              activationId: number.activationId,
+              wa_account_id: waAccountId,
+              verification_request_id: verificationRequestId,
+              error: cancelReason,
+            }));
+          } else {
+            appendDebugExchange(setDebugExchanges, debugInfo('SMSBower OTP submit failed', { activationId: number.activationId, error: cancelReason }));
+          }
         }
       } catch (error) {
         cancelReason = errorMessage(error);
         appendDebugExchange(setDebugExchanges, debugInfo('SMSBower order failed', { activationId: number.activationId, error: cancelReason }));
       } finally {
-        if (!completed && cancelReason) {
+        if (!completed && cancelReason && otpReceived && skipCancel) {
+          appendDebugExchange(setDebugExchanges, debugInfo('SMSBower cancel skipped after OTP received', {
+            activationId: number.activationId,
+            reason: cancelReason,
+          }));
+        } else if (!completed && cancelReason) {
           setPlatformState((state) => ({ ...state, message: `Cancelling SMSBower order ${number.activationId}` }));
           await cancelSMSBowerOrder(number.activationId, cancelReason, setDebugExchanges);
         }
@@ -1031,6 +1068,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
     onSuccess: ({ registerResponse }) => {
       setProbe(registerResponse);
       if (registerResponse.wa_account_id) setPendingAccountID(registerResponse.wa_account_id);
+      setPendingVerificationRequestID(registerResponse.verification_request_id || '');
       notify(registerResponse.success === false || registerResponse.error_message ? 'error' : 'success', registerResponse.error_message || '注册请求已提交');
       onChanged();
     },
@@ -1051,16 +1089,14 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
   });
   const otpMutation = useMutation({
     mutationFn: async () => {
-      const body = { wa_account_id: pendingAccountID, otp };
-      const exchange = debugRequest('提交 OTP', '/api/wa/actions/registration/resume-otp', body);
-      try {
-        const response = await submitRegistrationOTP(pendingAccountID, otp);
-        setDebugExchanges([{ ...exchange, response: sanitizeDebugValue(response) }]);
-        return response;
-      } catch (error) {
-        setDebugExchanges([{ ...exchange, error: debugError(error) }]);
-        throw error;
-      }
+      setDebugExchanges([]);
+      return submitRegistrationOTPWithRetry({
+        accountID: pendingAccountID,
+        verificationRequestID: pendingVerificationRequestID,
+        otp,
+        setDebugExchanges,
+        label: '?? OTP',
+      });
     },
     onSuccess: (result) => {
       notify(result.success === false || result.error_message ? 'error' : 'success', result.error_message || 'OTP 已提交');
@@ -1140,6 +1176,10 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
             <label>
               待注册账号 ID
               <input value={pendingAccountID} onChange={(event) => setPendingAccountID(event.target.value)} placeholder="wa_account_id" disabled={addAccountBusy} />
+            </label>
+            <label>
+              verification_request_id
+              <input value={pendingVerificationRequestID} onChange={(event) => setPendingVerificationRequestID(event.target.value)} placeholder="verification_request_id" disabled={addAccountBusy} />
             </label>
             <label>
               OTP
@@ -1418,6 +1458,55 @@ function smsbowerCancelExchange(entry: SMSBowerCancelLogEntry): DebugExchange {
   if (entry.response !== undefined) return { ...exchange, response: sanitizeDebugValue(entry.response) };
   if (entry.error !== undefined) return { ...exchange, error: debugError(entry.error) };
   return exchange;
+}
+
+const otpSubmitMaxAttempts = 3;
+const otpSubmitRetryDelayMs = 3000;
+
+type SubmitRegistrationOTPWithRetryInput = {
+  accountID: string;
+  verificationRequestID?: string;
+  otp: string;
+  label: string;
+  setDebugExchanges: React.Dispatch<React.SetStateAction<DebugExchange[]>>;
+  stopRef?: React.MutableRefObject<boolean>;
+  onRetry?: (attempt: number, error: unknown) => void;
+};
+
+async function submitRegistrationOTPWithRetry(input: SubmitRegistrationOTPWithRetryInput) {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= otpSubmitMaxAttempts; attempt += 1) {
+    if (input.stopRef?.current) throw new Error('SMSBower task was stopped by user');
+    const body: Record<string, string | number> = {
+      wa_account_id: input.accountID,
+      otp: input.otp,
+      attempt,
+    };
+    if (input.verificationRequestID) body.verification_request_id = input.verificationRequestID;
+    const exchange = debugRequest(input.label, '/api/wa/actions/registration/resume-otp', body);
+    appendDebugExchange(input.setDebugExchanges, exchange);
+    try {
+      const response = await submitRegistrationOTP(input.accountID, input.otp, {
+        verificationRequestID: input.verificationRequestID,
+      });
+      patchDebugExchange(input.setDebugExchanges, exchange, { ...exchange, response: sanitizeDebugValue(response) });
+      return response;
+    } catch (error) {
+      lastError = error;
+      patchDebugExchange(input.setDebugExchanges, exchange, { ...exchange, error: debugError(error) });
+      if (!isTransientOTPSubmitError(error) || attempt >= otpSubmitMaxAttempts) throw error;
+      input.onRetry?.(attempt, error);
+      appendDebugExchange(input.setDebugExchanges, debugInfo('OTP submit retry wait', {
+        attempt,
+        nextAttempt: attempt + 1,
+        waitMs: otpSubmitRetryDelayMs,
+        error: errorMessage(error),
+      }));
+      if (input.stopRef) await delayWithStop(otpSubmitRetryDelayMs, input.stopRef);
+      else await delay(otpSubmitRetryDelayMs);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(errorMessage(lastError));
 }
 
 async function waitForSMSBowerCode(

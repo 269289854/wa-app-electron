@@ -118,8 +118,33 @@ export function registerPhone(input: PhoneInput, deliveryMethod: string) {
   return apiRequest<WorkflowResponse>('/api/wa/register', { method: 'POST', body: { ...input, delivery_method: deliveryMethod }, timeoutMs: 95000 });
 }
 
-export function submitRegistrationOTP(accountID: string, otp: string) {
-  return apiRequest<WorkflowResponse>('/api/wa/actions/registration/resume-otp', { method: 'POST', body: { wa_account_id: accountID, otp }, timeoutMs: 70000 });
+export type SubmitRegistrationOTPInput = {
+  verificationRequestID?: string;
+};
+
+export function submitRegistrationOTP(accountID: string, otp: string, input: SubmitRegistrationOTPInput = {}) {
+  const body: Record<string, string> = { wa_account_id: accountID, otp };
+  if (input.verificationRequestID) body.verification_request_id = input.verificationRequestID;
+  return apiRequest<WorkflowResponse>('/api/wa/actions/registration/resume-otp', { method: 'POST', body, timeoutMs: 70000 });
+}
+
+export function isTransientOTPSubmitError(error: unknown) {
+  const message = apiErrorMessage(error).toLowerCase();
+  return message.includes('http 502')
+    || message.includes('http 503')
+    || message.includes('http 504')
+    || message.includes(' 502')
+    || message.includes(' 503')
+    || message.includes(' 504')
+    || message.includes('wasafe upstream')
+    || message.includes('timeout')
+    || message.includes('timed out')
+    || message.includes('network')
+    || message.includes('abort');
+}
+
+function apiErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function checkLoginState(input: Record<string, unknown>) {

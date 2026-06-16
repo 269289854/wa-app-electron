@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { messageText, normalizeTwoFactorStatus } from './api';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { isTransientOTPSubmitError, messageText, normalizeTwoFactorStatus, submitRegistrationOTP } from './api';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('messageText', () => {
   it('returns plain string text', () => {
@@ -51,5 +55,39 @@ describe('normalizeTwoFactorStatus', () => {
       emailAddress: '',
       emailLabel: '未配置邮箱',
     });
+  });
+});
+
+describe('submitRegistrationOTP', () => {
+  it('includes verification_request_id when available', async () => {
+    const request = vi.fn().mockResolvedValue({ success: true });
+    vi.stubGlobal('window', {
+      waApi: { request },
+    });
+
+    await submitRegistrationOTP('waacc_1', '123456', { verificationRequestID: 'wavrf_1' });
+
+    expect(request).toHaveBeenCalledWith({
+      path: '/api/wa/actions/registration/resume-otp',
+      method: 'POST',
+      timeoutMs: 70000,
+      body: {
+        wa_account_id: 'waacc_1',
+        verification_request_id: 'wavrf_1',
+        otp: '123456',
+      },
+    });
+  });
+});
+
+describe('isTransientOTPSubmitError', () => {
+  it('recognizes temporary upstream failures', () => {
+    expect(isTransientOTPSubmitError(new Error('wasafe upstream http 502: internal'))).toBe(true);
+    expect(isTransientOTPSubmitError(new Error('HTTP 503'))).toBe(true);
+    expect(isTransientOTPSubmitError(new Error('request timed out'))).toBe(true);
+  });
+
+  it('does not classify business validation failures as transient', () => {
+    expect(isTransientOTPSubmitError(new Error('otp is invalid'))).toBe(false);
   });
 });

@@ -52,6 +52,9 @@ type OpenAIPhoneCheckResult = {
   raw?: unknown;
 };
 
+const mockSMSBowerEnabled = process.env.WA_APP_ELECTRON_MOCK_SMSBOWER === '1';
+let mockSMSBowerStatusCalls = 0;
+
 const userDataDirOverride = process.env.WA_APP_ELECTRON_USER_DATA_DIR?.trim();
 if (userDataDirOverride) app.setPath('userData', userDataDirOverride);
 let mainWindow: BrowserWindow | null = null;
@@ -113,6 +116,28 @@ function getSMSBowerClient(config = readConfig()) {
   const apiKey = decodeSMSBowerApiKey(config, safeStorage);
   if (!apiKey) throw new Error('SMSBower API key is not configured');
   return new SMSBowerClient({ apiKey });
+}
+
+function mockSMSBowerCountries() {
+  return [{ id: '187', name: 'Smoke Country' }];
+}
+
+function mockSMSBowerPrices() {
+  return [{ country: '187', service: smsbowerWhatsAppService, cost: 0.2, count: 10, providerId: 'mock-provider' }];
+}
+
+function mockSMSBowerNumber() {
+  return { activationId: 'act-smoke-1', phone: '573145865572' };
+}
+
+function mockSMSBowerStatus() {
+  mockSMSBowerStatusCalls += 1;
+  if (mockSMSBowerStatusCalls < 2) return { status: 'waiting', raw: 'STATUS_WAIT_CODE' };
+  return { status: 'ok', code: '333444', raw: 'STATUS_OK:333444' };
+}
+
+function mockSMSBowerSetStatus(input: SMSBowerSetStatusInput) {
+  return input.status === 6 ? 'ACCESS_READY' : 'ACCESS_CANCEL';
 }
 
 function activeBaseUrl(config = readConfig()) {
@@ -446,15 +471,17 @@ app.whenReady().then(async () => {
       config: config.smsbower,
     };
   });
-  ipcMain.handle('smsbower:balance', () => getSMSBowerClient().getBalance());
-  ipcMain.handle('smsbower:countries', () => getSMSBowerClient().getCountries());
+  ipcMain.handle('smsbower:balance', () => (mockSMSBowerEnabled ? '100.00' : getSMSBowerClient().getBalance()));
+  ipcMain.handle('smsbower:countries', () => (mockSMSBowerEnabled ? mockSMSBowerCountries() : getSMSBowerClient().getCountries()));
   ipcMain.handle('smsbower:prices', (_event, input?: SMSBowerPriceInput) => {
+    if (mockSMSBowerEnabled) return mockSMSBowerPrices();
     const config = readConfig();
     const country = input?.country || config.smsbower.country;
     if (!country) throw new Error('SMSBower country is not configured');
     return getSMSBowerClient(config).getPrices(country, smsbowerWhatsAppService);
   });
   ipcMain.handle('smsbower:number', (_event, input?: SMSBowerNumberInput) => {
+    if (mockSMSBowerEnabled) return mockSMSBowerNumber();
     const config = readConfig();
     const country = input?.country || config.smsbower.country;
     const minPrice = Number(input?.minPrice ?? config.smsbower.minPrice);
@@ -463,8 +490,8 @@ app.whenReady().then(async () => {
     if (!Number.isFinite(maxPrice) || maxPrice <= 0) throw new Error('SMSBower max price is not configured');
     return getSMSBowerClient(config).getNumber({ country, minPrice, maxPrice, providerIds: input?.providerIds, service: smsbowerWhatsAppService });
   });
-  ipcMain.handle('smsbower:get-status', (_event, id: string) => getSMSBowerClient().getStatus(id));
-  ipcMain.handle('smsbower:set-status', (_event, input: SMSBowerSetStatusInput) => getSMSBowerClient().setStatus(input.id, input.status));
+  ipcMain.handle('smsbower:get-status', (_event, id: string) => (mockSMSBowerEnabled ? mockSMSBowerStatus() : getSMSBowerClient().getStatus(id)));
+  ipcMain.handle('smsbower:set-status', (_event, input: SMSBowerSetStatusInput) => (mockSMSBowerEnabled ? mockSMSBowerSetStatus(input) : getSMSBowerClient().setStatus(input.id, input.status)));
   createWindow();
 });
 
