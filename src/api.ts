@@ -10,6 +10,7 @@ import type {
   WAAccount,
   WAContact,
   WorkflowResponse,
+  TwoFactorProjection,
 } from './types';
 
 export const ACCOUNT_PAGE_SIZE = 100;
@@ -251,6 +252,29 @@ function extractMessageText(value: unknown, seen: Set<unknown>): string {
 
 export function messageTime(message: AccountMessage) {
   return timestampValue(message.sent_at || message.received_at || message.created_at);
+}
+
+export type NormalizedTwoFactorStatus = {
+  configured: boolean | null;
+  emailConfigured: boolean;
+  emailVerified: boolean | null;
+  emailAddress: string;
+  emailLabel: string;
+};
+
+export function normalizeTwoFactorStatus(...values: Array<TwoFactorProjection | null | undefined>): NormalizedTwoFactorStatus {
+  const merged = Object.assign({}, ...values.filter(Boolean)) as TwoFactorProjection;
+  const configured = typeof merged.configured === 'boolean' ? merged.configured : null;
+  const emailAddress = String(merged.email_address || '').trim();
+  const emailConfigured = Boolean(merged.email_configured || emailAddress);
+  const hasVerifiedFlag = typeof merged.email_verified === 'boolean' || typeof merged.email_confirmed === 'boolean';
+  const emailVerified = hasVerifiedFlag ? Boolean(merged.email_verified || merged.email_confirmed) : null;
+  const emailLabel = !emailConfigured
+    ? '未配置邮箱'
+    : emailVerified === true
+      ? '已验证'
+      : '待验证邮箱';
+  return { configured, emailConfigured, emailVerified, emailAddress, emailLabel };
 }
 
 export function timestampValue(input: unknown): Date | null {

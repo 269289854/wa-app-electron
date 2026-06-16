@@ -69,6 +69,7 @@ const server = http.createServer(async (req, res) => {
       display_name: 'Mock Account',
       status: 'ACTIVE',
       phone: { e164_number: '+15550100001', country_iso2: 'US', country_calling_code: '1' },
+      two_factor_auth: { configured: true, email_configured: true, email_address: 'mock@example.com' },
       audit: { created_at: '2026-06-11T23:00:00Z', updated_at: '2026-06-12T00:00:00Z' },
     }],
       next_cursor: 'page-2',
@@ -378,6 +379,13 @@ async function main() {
       return true;
     `);
     await route(client, '#/account', 'document.body.innerText.includes("Mock Account") && document.body.innerText.includes("profile-1") && document.body.innerText.includes("SmokeVendor SmokePhone") && document.body.innerText.includes("fdid-1") && document.body.innerText.includes("LTE") && document.body.innerText.includes("123456") && document.body.innerText.includes("connected") && document.body.innerText.includes("US") && Boolean([...document.querySelectorAll(".info-card")].find((card) => card.querySelector(".info-grid"))) && Boolean(document.querySelector("[data-action=refresh-avatar]"))');
+    await runInPage(client, `
+      const text = document.body.innerText;
+      if (!text.includes('mock@example.com')) throw new Error('Security email address is not visible');
+      if (!text.includes('待验证邮箱')) throw new Error('Pending email status is not visible');
+      if (text.includes('未显示邮箱')) throw new Error('Security panel still shows missing email fallback');
+      return true;
+    `);
     await runInPage(client, `
       const setValue = (input, value) => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);

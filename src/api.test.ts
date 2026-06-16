@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { messageText } from './api';
+import { messageText, normalizeTwoFactorStatus } from './api';
 
 describe('messageText', () => {
   it('returns plain string text', () => {
@@ -17,5 +17,39 @@ describe('messageText', () => {
 
   it('does not stringify unknown objects', () => {
     expect(messageText({ text: { unknown: { value: {} } } })).toBe('');
+  });
+});
+
+describe('normalizeTwoFactorStatus', () => {
+  it('uses account projection before a status sync finishes', () => {
+    expect(normalizeTwoFactorStatus({ configured: true, email_configured: true, email_address: 'mock@example.com' })).toEqual({
+      configured: true,
+      emailConfigured: true,
+      emailVerified: null,
+      emailAddress: 'mock@example.com',
+      emailLabel: '待验证邮箱',
+    });
+  });
+
+  it('lets synced status override the account projection', () => {
+    expect(normalizeTwoFactorStatus(
+      { configured: false, email_address: '' },
+      { configured: true, email_configured: true, email_verified: true, email_address: 'synced@example.com' },
+    )).toMatchObject({
+      configured: true,
+      emailConfigured: true,
+      emailVerified: true,
+      emailAddress: 'synced@example.com',
+      emailLabel: '已验证',
+    });
+  });
+
+  it('labels missing email clearly', () => {
+    expect(normalizeTwoFactorStatus({ configured: false })).toMatchObject({
+      configured: false,
+      emailConfigured: false,
+      emailAddress: '',
+      emailLabel: '未配置邮箱',
+    });
   });
 });

@@ -46,6 +46,7 @@ import {
   messageText,
   messageTime,
   normalizeContacts,
+  normalizeTwoFactorStatus,
   probePhoneSMS,
   registerPhone,
   removeProfilePicture,
@@ -722,15 +723,18 @@ function ProfileCard({ account, notify, onChanged, onAvatarChanged }: { account:
 
 function SecurityCard({ account, notify }: { account: WAAccount; notify: (kind: Toast['kind'], message: string) => void }) {
   const accountId = accountID(account);
+  const queryClient = useQueryClient();
   const [pin, setPin] = useState('');
   const [email, setEmail] = useState('');
   const [emailOtp, setEmailOtp] = useState('');
   const statusQuery = useQuery({ queryKey: ['2fa', accountId], queryFn: () => getTwoFactorStatus(accountId, true), enabled: false });
+  const securityStatus = normalizeTwoFactorStatus(account.two_factor_auth, statusQuery.data?.status);
   const makeMutation = (fn: () => Promise<unknown>, message: string) => useMutation({
     mutationFn: fn,
     onSuccess: () => {
       notify('success', message);
       void statusQuery.refetch();
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
     },
     onError: (error) => notify('error', errorMessage(error)),
   });
@@ -745,8 +749,9 @@ function SecurityCard({ account, notify }: { account: WAAccount; notify: (kind: 
           <RefreshCw size={15} className={statusQuery.isFetching ? 'spin' : ''} />
           同步状态
         </button>
-        <span>{statusQuery.data?.status?.configured ? '2FA 已配置' : '2FA 未知/未配置'}</span>
-        <span>{statusQuery.data?.status?.email_address || '未显示邮箱'}</span>
+        <span>{securityStatus.configured === true ? '2FA 已配置' : securityStatus.configured === false ? '2FA 未配置' : '2FA 未知'}</span>
+        <span>{securityStatus.emailAddress || '未配置邮箱'}</span>
+        <span>{securityStatus.emailLabel}</span>
       </div>
       <div className="form-grid two">
         <label>
