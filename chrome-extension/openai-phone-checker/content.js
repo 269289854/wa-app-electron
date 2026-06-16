@@ -1,14 +1,30 @@
+const inFlightChecks = new Map();
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'openai-phone-check-ping') {
     sendResponse({ ok: true });
     return false;
   }
   if (message?.type !== 'openai-phone-check') return false;
-  runOpenAIPhoneCheck(message.task)
+  const requestKey = taskKey(message.task);
+  const promise = inFlightChecks.get(requestKey) || runOpenAIPhoneCheck(message.task).finally(() => {
+    inFlightChecks.delete(requestKey);
+  });
+  inFlightChecks.set(requestKey, promise);
+  promise
     .then(sendResponse)
     .catch((error) => sendResponse({ status: 'error', message: String(error?.message || error), raw: { extensionError: String(error?.message || error) } }));
   return true;
 });
+
+function taskKey(task) {
+  if (task?.requestId) return String(task.requestId);
+  return JSON.stringify({
+    phoneNumber: task?.phoneNumber,
+    countryCallingCode: task?.countryCallingCode,
+    mode: task?.mode,
+  });
+}
 
 async function runOpenAIPhoneCheck(task) {
   if (task.mode === 'page') return runPageCheck(task);

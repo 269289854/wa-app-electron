@@ -1,6 +1,7 @@
 const BRIDGE_BASE_URL = 'http://127.0.0.1:17391';
 const DEFAULT_MODE = 'api';
 let lastState = { status: 'idle', message: 'Waiting for WA App task', task: null, result: null, at: '' };
+const activeTasks = new Map();
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.set({ mode: DEFAULT_MODE });
@@ -41,10 +42,25 @@ async function pollTask() {
   }
   const mode = (await chrome.storage.local.get({ mode: DEFAULT_MODE })).mode;
   const task = { ...data.task, mode: data.task.mode || mode };
+  if (activeTasks.has(task.requestId)) {
+    updateState({ status: 'checking', message: `Checking ${task.phoneNumber}`, task });
+    return;
+  }
   updateState({ status: 'checking', message: `Checking ${task.phoneNumber}`, task });
-  const result = await runTask(task);
-  await reportResult({ ...result, requestId: task.requestId, phoneNumber: task.phoneNumber });
-  updateState({ status: result.status, message: result.message, task, result });
+  const promise = runTask(task)
+    .then(async (result) => {
+      await reportResult({ ...result, requestId: task.requestId, phoneNumber: task.phoneNumber });
+      updateState({ status: result.status, message: result.message, task, result });
+    })
+    .catch((error) => {
+      const result = { status: 'error', message: String(error?.message || error), raw: { extensionError: String(error?.message || error) } };
+      updateState({ status: result.status, message: result.message, task, result });
+    })
+    .finally(() => {
+      activeTasks.delete(task.requestId);
+    });
+  activeTasks.set(task.requestId, promise);
+  await promise;
 }
 
 async function runTask(task) {
