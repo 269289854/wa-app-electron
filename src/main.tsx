@@ -239,10 +239,10 @@ function DesktopApp() {
           <SettingsPanel notify={notify} compact={false} />
         ) : (
           <>
-            <div hidden={view !== 'add'}>
+            <div className="view-pane" hidden={view !== 'add'}>
               <AddAccountPanel notify={notify} onChanged={refreshAccounts} />
             </div>
-            <div hidden={view !== 'account'}>
+            <div className="view-pane" hidden={view !== 'account'}>
               <AccountPanel
                 account={selectedAccount}
                 avatarVersion={accountAvatarVersion}
@@ -251,10 +251,10 @@ function DesktopApp() {
                 onChanged={refreshAccounts}
               />
             </div>
-            <div hidden={view !== 'settings'}>
+            <div className="view-pane" hidden={view !== 'settings'}>
               <SettingsPanel notify={notify} compact={false} />
             </div>
-            <div hidden={view !== 'chats'}>
+            <div className="view-pane" hidden={view !== 'chats'}>
               <ChatPanel
                 account={selectedAccount}
                 selectedContactID={selectedContactID}

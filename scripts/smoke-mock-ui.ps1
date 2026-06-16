@@ -497,6 +497,9 @@ async function main() {
       const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
       const platformCard = [...addPage.querySelectorAll('.info-card')].find((card) => card.querySelector('.platform-register'));
       const button = platformCard?.querySelector('.primary-button');
+      for (let index = 0; index < 50 && button?.disabled; index += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
       if (!button || button.disabled) throw new Error('Platform registration button is not ready');
       button.click();
       return true;
@@ -507,6 +510,15 @@ async function main() {
     await new Promise((resolve) => setTimeout(resolve, 500));
     await route(client, '#/add', 'Boolean(document.querySelector(".app-shell[data-view=add]") && document.querySelector(".add-page"))');
     checks.platformRegistrationSurvivesNavigation = await waitForExpression(client, 'document.querySelector(".add-page .debug-json")?.innerText.includes("SMSBower start")');
+    checks.addPageScroll = await runInPage(client, `
+      const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
+      if (!addPage) throw new Error('Visible add page not found');
+      if (addPage.scrollHeight <= addPage.clientHeight) throw new Error('Add page does not have scrollable overflow in smoke viewport');
+      addPage.scrollTop = addPage.scrollHeight;
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      if (addPage.scrollTop <= 0) throw new Error('Add page scrollTop did not move');
+      return true;
+    `);
     await route(client, '#/settings', 'Boolean(document.querySelector(".app-shell[data-view=settings] .settings-page"))');
     checks.settingsPage = true;
   } finally {

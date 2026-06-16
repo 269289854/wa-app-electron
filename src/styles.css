@@ -133,6 +133,12 @@ button { cursor: pointer; }
 }
 
 .workspace { display: grid; grid-template-rows: 56px minmax(0, 1fr); min-width: 0; min-height: 0; }
+.view-pane { min-height: 0; overflow: hidden; }
+.view-pane:not([hidden]) { display: grid; min-height: 0; }
+.view-pane > .account-page,
+.view-pane > .add-page,
+.view-pane > .settings-page,
+.view-pane > .chat-layout { min-height: 0; }
 .top-bar {
   display: flex;
   align-items: center;
