@@ -158,6 +158,10 @@ function DesktopApp() {
 
   const selectedAccount = accounts.find((account) => accountID(account) === selectedAccountID);
   const connected = apiReady;
+  const refreshAccounts = useCallback(() => {
+    setAccountCursor('');
+    void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+  }, []);
 
   return (
     <div className="app-shell" data-view={view}>
@@ -233,25 +237,32 @@ function DesktopApp() {
         />
         {!connected && view !== 'settings' ? (
           <SettingsPanel notify={notify} compact={false} />
-        ) : view === 'add' ? (
-          <AddAccountPanel notify={notify} onChanged={() => { setAccountCursor(''); void queryClient.invalidateQueries({ queryKey: ['accounts'] }); }} />
-        ) : view === 'account' ? (
-          <AccountPanel
-            account={selectedAccount}
-            avatarVersion={accountAvatarVersion}
-            notify={notify}
-            onAvatarChanged={() => setAccountAvatarVersion(String(Date.now()))}
-            onChanged={() => { setAccountCursor(''); void queryClient.invalidateQueries({ queryKey: ['accounts'] }); }}
-          />
-        ) : view === 'settings' ? (
-          <SettingsPanel notify={notify} compact={false} />
         ) : (
-          <ChatPanel
-            account={selectedAccount}
-            selectedContactID={selectedContactID}
-            onSelectContact={setSelectedContactID}
-            notify={notify}
-          />
+          <>
+            <div hidden={view !== 'add'}>
+              <AddAccountPanel notify={notify} onChanged={refreshAccounts} />
+            </div>
+            <div hidden={view !== 'account'}>
+              <AccountPanel
+                account={selectedAccount}
+                avatarVersion={accountAvatarVersion}
+                notify={notify}
+                onAvatarChanged={() => setAccountAvatarVersion(String(Date.now()))}
+                onChanged={refreshAccounts}
+              />
+            </div>
+            <div hidden={view !== 'settings'}>
+              <SettingsPanel notify={notify} compact={false} />
+            </div>
+            <div hidden={view !== 'chats'}>
+              <ChatPanel
+                account={selectedAccount}
+                selectedContactID={selectedContactID}
+                onSelectContact={setSelectedContactID}
+                notify={notify}
+              />
+            </div>
+          </>
         )}
       </main>
       <ToastStack toasts={toasts} />
@@ -528,11 +539,11 @@ function AccountPanel({ account, avatarVersion, notify, onChanged, onAvatarChang
           删除账号
         </button>
       </div>
-      {isRegistrationPending(account) ? <ManualOtpCard account={account} notify={notify} onChanged={onChanged} /> : null}
+      {isRegistrationPending(account) ? <ManualOtpCard key={`otp-${accountId}`} account={account} notify={notify} onChanged={onChanged} /> : null}
       <div className="dashboard-grid">
-        <ProfileCard account={account} notify={notify} onChanged={() => { onChanged(); void queryClient.invalidateQueries({ queryKey: ['accounts'] }); }} onAvatarChanged={onAvatarChanged} />
+        <ProfileCard key={`profile-${accountId}`} account={account} notify={notify} onChanged={() => { onChanged(); void queryClient.invalidateQueries({ queryKey: ['accounts'] }); }} onAvatarChanged={onAvatarChanged} />
         <AccountInfoCard account={account} />
-        <SecurityCard account={account} notify={notify} />
+        <SecurityCard key={`security-${accountId}`} account={account} notify={notify} />
         <InfoCard title="设备指纹" icon={<Fingerprint size={17} />}>
           <ProfilesList profiles={profilesQuery.data?.client_profiles || []} loading={profilesQuery.isLoading} />
         </InfoCard>

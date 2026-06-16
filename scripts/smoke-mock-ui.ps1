@@ -267,6 +267,22 @@ async function waitForOperation(path, method = 'POST', timeoutMs = 15000, afterI
   throw new Error(`Operation ${method} ${path} was not recorded`);
 }
 
+async function waitForOperationWithDebug(client, path, method = 'POST', timeoutMs = 15000, afterIndex = 0) {
+  try {
+    return await waitForOperation(path, method, timeoutMs, afterIndex);
+  } catch (error) {
+    const operations = await getOperations();
+    const pageText = await evaluate(client, `(() => {
+      const addPage = document.querySelector('.app-shell[data-view=add] .add-page');
+      const debug = document.querySelector('.add-page .debug-json')?.innerText || '';
+      const buttons = addPage ? [...addPage.querySelectorAll('button')].map((button) => ({ text: button.innerText, disabled: button.disabled, visible: button.offsetParent !== null })) : [];
+      const inputs = addPage ? [...addPage.querySelectorAll('input')].map((input) => ({ value: input.value, placeholder: input.placeholder, type: input.type, visible: input.offsetParent !== null })) : [];
+      return JSON.stringify({ debug, buttons, inputs, view: document.querySelector('.app-shell')?.dataset.view });
+    })()`).catch(() => '');
+    throw new Error(`${error.message}\noperations=${JSON.stringify(operations.slice(afterIndex))}\npage=${pageText}`);
+  }
+}
+
 async function runInPage(client, source, timeoutMs = 30000) {
   try {
     new Function(`return (async () => { ${source} })()`);
@@ -286,6 +302,7 @@ async function main() {
     checks.shell = await waitForExpression(client, 'Boolean(document.querySelector(".app-shell"))');
     checks.config = await evaluate(client, 'window.waConfig.get().then((config) => ({ remoteBaseUrl: config.remoteBaseUrl, hasPassword: config.hasPassword }))');
     if (checks.config.remoteBaseUrl !== expectedBaseUrl || !checks.config.hasPassword) throw new Error('Mock config was not applied');
+    await evaluate(client, 'window.waConfig.set({ smsbower: { openAIPhoneCheckEnabled: false } })');
     checks.accountRail = await waitForExpression(client, 'document.body.innerText.includes("Mock Account")');
     checks.connectionDot = await waitForExpression(client, 'Boolean(document.querySelector(".connection-dot.ok"))');
     const operationsBeforeManualOtp = (await getOperations()).length;
@@ -366,8 +383,9 @@ async function main() {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
         input.dispatchEvent(new Event('input', { bubbles: true }));
       };
-      const textInputs = [...document.querySelectorAll('input:not([type]), input[type="text"]')];
-      const displayName = textInputs.find((input) => input.value === 'Mock Account');
+      const accountPage = [...document.querySelectorAll('.app-shell[data-view=account] .account-page')].find((page) => page.offsetParent !== null);
+      const textInputs = [...accountPage.querySelectorAll('input:not([type]), input[type="text"]')].filter((input) => input.offsetParent !== null);
+      const displayName = textInputs[0];
       if (!displayName) throw new Error('Display name input not found');
       setValue(displayName, 'Mock Renamed');
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -417,7 +435,9 @@ async function main() {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
         input.dispatchEvent(new Event('input', { bubbles: true }));
       };
-      const passwordInputs = [...document.querySelectorAll('input[type="password"]')];
+      const accountPage = [...document.querySelectorAll('.app-shell[data-view=account] .account-page')].find((page) => page.offsetParent !== null);
+      const email = accountPage.querySelector('input[type="email"]');
+      const passwordInputs = [...email.closest('.form-grid.two').querySelectorAll('input[type="password"]')].filter((input) => input.offsetParent !== null);
       const otp = passwordInputs[1];
       if (!otp) throw new Error('Email OTP input not found');
       const actions = otp.closest('.form-grid.two').querySelector('.inline-actions');
@@ -433,46 +453,61 @@ async function main() {
     await waitForOperation('/api/wa/account-settings/email/otp/verify');
     checks.accountPage = true;
     checks.accountActions = true;
-    await route(client, '#/add', 'Boolean(document.querySelector(".add-page"))');
+    await route(client, '#/add', 'Boolean(document.querySelector(".app-shell[data-view=add] .add-page"))');
     await runInPage(client, `
       const setValue = (input, value) => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
         input.dispatchEvent(new Event('input', { bubbles: true }));
       };
-      const inputs = [...document.querySelectorAll('.add-page input')];
+      const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
+      const inputs = [...addPage.querySelectorAll('input')].filter((input) => input.offsetParent !== null);
       setValue(inputs[0], '+1');
-      setValue(inputs[1], '5550100003');
+      setValue(inputs[1], '4155550123');
       await new Promise((resolve) => setTimeout(resolve, 250));
-      const actions = document.querySelector('.add-page .inline-actions');
-      const buttons = [...actions.querySelectorAll('button')];
-      if (!buttons[0] || buttons[0].disabled || !buttons[0].innerText.includes('探测')) throw new Error('Probe/register button is not ready');
-      buttons[0].click();
+      const firstCard = addPage.querySelector('.info-card');
+      const button = firstCard?.querySelector('button.primary-button');
+      if (!button || button.disabled) throw new Error('Probe/register button is not ready: ' + addPage.innerText);
+      button.click();
       return true;
     `);
-    await waitForOperation('/api/wa/phone/sms-probe');
-    await waitForOperation('/api/wa/register');
+    await waitForOperationWithDebug(client, '/api/wa/phone/sms-probe');
+    await waitForOperationWithDebug(client, '/api/wa/register');
     const operationsBeforeRegistrationOtp = (await getOperations()).length;
     await runInPage(client, `
       const setValue = (input, value) => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
         input.dispatchEvent(new Event('input', { bubbles: true }));
       };
-      const inputs = [...document.querySelectorAll('.add-page input')];
+      const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
+      const inputs = [...addPage.querySelectorAll('input')].filter((input) => input.offsetParent !== null);
       const accountID = inputs.find((input) => input.placeholder === 'wa_account_id');
       const otp = inputs.find((input) => input.type === 'password');
       if (!accountID || !otp) throw new Error('Registration OTP inputs not found');
       setValue(accountID, 'wa-account-1');
       setValue(otp, '111222');
       await new Promise((resolve) => setTimeout(resolve, 250));
-      const buttons = [...document.querySelectorAll('.add-page .primary-button')];
-      const button = buttons[buttons.length - 1];
+      const button = otp.closest('.info-card').querySelector('.primary-button');
       if (!button || button.disabled) throw new Error('Registration OTP button is not ready');
       button.click();
       return true;
     `);
     await waitForOperation('/api/wa/actions/registration/resume-otp', 'POST', 15000, operationsBeforeRegistrationOtp);
     checks.registrationActions = true;
-    await route(client, '#/settings', 'Boolean(document.querySelector(".app-shell[data-view=settings]") && document.querySelector(".settings-page") && document.body.innerText.includes("SMSBower API Key") && document.body.innerText.includes("启用 SMSBower"))');
+    await runInPage(client, `
+      const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
+      const platformCard = [...addPage.querySelectorAll('.info-card')].find((card) => card.querySelector('.platform-register'));
+      const button = platformCard?.querySelector('.primary-button');
+      if (!button || button.disabled) throw new Error('Platform registration button is not ready');
+      button.click();
+      return true;
+    `);
+    await waitForExpression(client, 'document.querySelector(".add-page .debug-json")?.innerText.includes("SMSBower start")');
+    await route(client, '#/settings', 'Boolean(document.querySelector(".app-shell[data-view=settings] .settings-page"))');
+    await evaluate(client, 'window.smsbower.stopRegistrationTask()');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await route(client, '#/add', 'Boolean(document.querySelector(".app-shell[data-view=add]") && document.querySelector(".add-page"))');
+    checks.platformRegistrationSurvivesNavigation = await waitForExpression(client, 'document.querySelector(".add-page .debug-json")?.innerText.includes("SMSBower start")');
+    await route(client, '#/settings', 'Boolean(document.querySelector(".app-shell[data-view=settings] .settings-page"))');
     checks.settingsPage = true;
   } finally {
     client.close();
@@ -502,6 +537,19 @@ try {
     mode = "remote"
     remoteBaseUrl = $serverInfo.baseUrl
     password = "mock-password"
+    smsbowerApiKey = "mock-smsbower-key"
+    smsbower = @{
+      enabled = $true
+      country = "187"
+      minPrice = 0
+      maxPrice = 1
+      targetSuccessCount = 1
+      maxOrders = 1
+      numberIntervalSeconds = 0
+      openAIPhoneCheckEnabled = $false
+      pollIntervalSeconds = 2
+      otpTimeoutSeconds = 30
+    }
   } | ConvertTo-Json -Compress
   $env:WA_APP_ELECTRON_USER_DATA_DIR = $userData
   $env:WA_APP_ELECTRON_TEST_CONFIG = $configJson

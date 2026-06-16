@@ -19,4 +19,20 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
     },
   },
+  {
+    files: ['chrome-extension/**/*.js'],
+    languageOptions: {
+      globals: {
+        chrome: 'readonly',
+        clearInterval: 'readonly',
+        document: 'readonly',
+        Event: 'readonly',
+        fetch: 'readonly',
+        HTMLElement: 'readonly',
+        HTMLInputElement: 'readonly',
+        setInterval: 'readonly',
+        setTimeout: 'readonly',
+      },
+    },
+  },
 );
