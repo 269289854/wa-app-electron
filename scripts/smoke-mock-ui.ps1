@@ -559,6 +559,26 @@ async function main() {
     const cancelledAfterOtp = await evaluate(client, 'Boolean(document.querySelector(".add-page .debug-json")?.innerText.includes(\'"status": 8\'))');
     if (cancelledAfterOtp) throw new Error('Platform registration cancelled SMSBower order after receiving OTP');
     checks.platformNoCancelAfterOtp = true;
+    await evaluate(client, 'window.waConfig.set({ smsbower: { openAIPhoneCheckEnabled: true, maxOrders: 2 } })');
+    const operationsBeforeRateLimit = (await getOperations()).length;
+    await runInPage(client, `
+      const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
+      const platformCard = [...addPage.querySelectorAll('.info-card')].find((card) => card.querySelector('.platform-register'));
+      let button = platformCard?.querySelector('.primary-button');
+      for (let index = 0; index < 50 && button?.disabled; index += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        button = platformCard?.querySelector('.primary-button');
+      }
+      if (!button || button.disabled) throw new Error('Platform registration button is not ready for OpenAI rate limit scenario');
+      button.click();
+      return true;
+    `);
+    await waitForOperationCount('/api/wa/phone/sms-probe', 1, 'POST', 15000, operationsBeforeRateLimit);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const rateLimitOperations = (await getOperations()).slice(operationsBeforeRateLimit);
+    const rateLimitRegisters = rateLimitOperations.filter((operation) => operation.path === '/api/wa/register');
+    if (rateLimitRegisters.length) throw new Error(`OpenAI rate limit scenario still called register: ${JSON.stringify(rateLimitRegisters)}`);
+    checks.platformStopsOnOpenAIRateLimit = true;
     await route(client, '#/settings', 'Boolean(document.querySelector(".app-shell[data-view=settings] .settings-page"))');
     await evaluate(client, 'window.smsbower.stopRegistrationTask()');
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -620,6 +640,7 @@ try {
   $env:WA_APP_ELECTRON_USER_DATA_DIR = $userData
   $env:WA_APP_ELECTRON_TEST_CONFIG = $configJson
   $env:WA_APP_ELECTRON_MOCK_SMSBOWER = "1"
+  $env:WA_APP_ELECTRON_MOCK_OPENAI_PHONE = "rate_limit"
   $process = Start-Process -FilePath $exe -ArgumentList "--remote-debugging-port=$DebugPort" -WorkingDirectory $root -PassThru -WindowStyle Hidden
   Start-Sleep -Seconds 8
   if ($process.HasExited) {
@@ -636,6 +657,7 @@ try {
   Remove-Item Env:\WA_APP_ELECTRON_USER_DATA_DIR -ErrorAction SilentlyContinue
   Remove-Item Env:\WA_APP_ELECTRON_TEST_CONFIG -ErrorAction SilentlyContinue
   Remove-Item Env:\WA_APP_ELECTRON_MOCK_SMSBOWER -ErrorAction SilentlyContinue
+  Remove-Item Env:\WA_APP_ELECTRON_MOCK_OPENAI_PHONE -ErrorAction SilentlyContinue
   Get-Process | Where-Object { $_.Path -like "*wa-app-electron*WA App.exe*" } | Stop-Process -Force -ErrorAction SilentlyContinue
   if ($mockProcess -and !$mockProcess.HasExited) {
     Stop-Process -Id $mockProcess.Id -Force -ErrorAction SilentlyContinue

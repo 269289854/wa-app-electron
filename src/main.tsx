@@ -757,19 +757,19 @@ function SecurityCard({ account, notify }: { account: WAAccount; notify: (kind: 
       <div className="form-grid two">
         <label>
           6 位 PIN
-          <input value={pin} onChange={(event) => setPin(event.target.value.replace(/\D+/g, '').slice(0, 6))} type="password" />
+          <input value={pin} onChange={(event) => setPin(event.target.value.replace(/\D+/g, '').slice(0, 6))} type="password" disabled={pinMutation.isPending} />
         </label>
         <button className="primary-button" disabled={pin.length !== 6 || pinMutation.isPending} onClick={() => pinMutation.mutate()}>
-          <KeyRound size={15} />
-          设置/修改 PIN
+          {pinMutation.isPending ? <Loader2 className="spin" size={15} /> : <KeyRound size={15} />}
+          {pinMutation.isPending ? '设置中...' : '设置/修改 PIN'}
         </button>
         <label>
           邮箱
-          <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" />
+          <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" disabled={emailMutation.isPending} />
         </label>
         <button className="primary-button" disabled={!email || emailMutation.isPending} onClick={() => emailMutation.mutate()}>
-          <AtSign size={15} />
-          设置邮箱
+          {emailMutation.isPending ? <Loader2 className="spin" size={15} /> : <AtSign size={15} />}
+          {emailMutation.isPending ? '设置中...' : '设置邮箱'}
         </button>
         <label>
           邮箱 OTP
@@ -827,7 +827,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
     setPhone(normalized.phone);
   };
   const startSMSBowerRegistrationTask = async (): Promise<SMSBowerRegistrationTaskResult> => {
-    const config = configQuery.data?.smsbower || (await window.waConfig.get()).smsbower;
+    const config = (await window.waConfig.get()).smsbower;
     if (!config.configured) throw new Error('SMSBower is not configured');
     stopPlatformRef.current = false;
     setDebugExchanges([]);
@@ -925,6 +925,11 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
             activationId: number.activationId,
             reason: cancelReason,
           }));
+          if (registration.stopTask) {
+            stopPlatformRef.current = true;
+            setPlatformState((state) => ({ ...state, stopping: true, message: cancelReason }));
+            throw new Error(cancelReason);
+          }
           continue;
         }
         const waAccountId = registration.response.wa_account_id || '';
@@ -1044,6 +1049,13 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
           result: openAIResult,
         }));
         throw new Error('openai \u624b\u673a\u53f7\u5df2\u88ab\u4f7f\u7528');
+      }
+      if (openAIResult.status === 'rate_limited') {
+        appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check rate limited', {
+          phoneNumber: phoneInput.e164_number,
+          result: openAIResult,
+        }));
+        throw new Error(openAIResult.message);
       }
       if (openAIResult.status === 'error') {
         appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check failed', {
@@ -1358,6 +1370,13 @@ async function probeAndRegisterForSMSBower(
       result: openAIResult,
     }));
     return { ok: false as const, reason: 'openai \u624b\u673a\u53f7\u5df2\u88ab\u4f7f\u7528' };
+  }
+  if (openAIResult.status === 'rate_limited') {
+    appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check rate limited', {
+      phoneNumber: phoneInput.e164_number,
+      result: openAIResult,
+    }));
+    return { ok: false as const, reason: openAIResult.message, stopTask: true };
   }
   if (openAIResult.status === 'error') {
     appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check failed', {
@@ -2151,6 +2170,9 @@ function formatDate(date: Date | null, withTime = false) {
 function errorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
+  if (message.includes('OpenAI 已超过请求手机号次数') || normalized.includes('too many phone verification requests') || normalized.includes('rate_limit_exceeded')) {
+    return 'OpenAI 已超过请求手机号次数，请稍后再试或关闭 OpenAI 手机号检查';
+  }
   if (normalized.includes('reason=blocked') || normalized.includes('number is blocked')) return '号码被 WhatsApp 拒绝或封禁，当前协议链路无法发起验证码。';
   if (normalized.includes('too_recent') || normalized.includes('too_many') || normalized.includes('cooling down') || normalized.includes('rate_limited')) return '请求过于频繁，正在冷却中，请稍后再试。';
   if (normalized.includes('no_routes') || normalized.includes('route_unavailable')) return '暂无可用验证码通道，请换 SMS/语音或稍后再试。';

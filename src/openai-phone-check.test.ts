@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeOpenAIPhoneCheckResult } from './openai-phone-check';
+import { OPENAI_PHONE_RATE_LIMIT_MESSAGE, normalizeOpenAIPhoneCheckResult } from './openai-phone-check';
 
 describe('OpenAI phone check result normalization', () => {
   it('marks phone_number_in_use errors as used', () => {
@@ -37,6 +37,27 @@ describe('OpenAI phone check result normalization', () => {
       status: 'error',
       message: 'Try later',
       code: 'rate_limited',
+    });
+  });
+
+  it('marks OpenAI phone verification request limits as rate limited', () => {
+    expect(normalizeOpenAIPhoneCheckResult({
+      message: "You've made too many phone verification requests. Please try again later or contact us through our help center at help.openai.com.",
+      type: 'invalid_request_error',
+      param: null,
+      code: 'rate_limit_exceeded',
+    })).toMatchObject({
+      status: 'rate_limited',
+      message: OPENAI_PHONE_RATE_LIMIT_MESSAGE,
+      code: 'rate_limit_exceeded',
+    });
+  });
+
+  it('recognizes rate limit wording even without a code', () => {
+    expect(normalizeOpenAIPhoneCheckResult({ message: 'Too many phone verification requests. See help.openai.com.' })).toMatchObject({
+      status: 'rate_limited',
+      message: OPENAI_PHONE_RATE_LIMIT_MESSAGE,
+      code: 'rate_limit_exceeded',
     });
   });
 });

@@ -1,4 +1,4 @@
-export type OpenAIPhoneCheckStatus = 'used' | 'sent' | 'available' | 'error';
+export type OpenAIPhoneCheckStatus = 'used' | 'sent' | 'available' | 'error' | 'rate_limited';
 
 export type OpenAIPhoneCheckResult = {
   requestId?: string;
@@ -10,6 +10,7 @@ export type OpenAIPhoneCheckResult = {
 };
 
 const PHONE_USED_MESSAGE = 'openai \u624b\u673a\u53f7\u5df2\u88ab\u4f7f\u7528';
+export const OPENAI_PHONE_RATE_LIMIT_MESSAGE = 'OpenAI 已超过请求手机号次数，请稍后再试或关闭 OpenAI 手机号检查';
 
 export function normalizeOpenAIPhoneCheckResult(input: unknown): OpenAIPhoneCheckResult {
   const record = asRecord(input);
@@ -35,6 +36,22 @@ export function normalizeOpenAIPhoneCheckResult(input: unknown): OpenAIPhoneChec
       status: 'used',
       message: PHONE_USED_MESSAGE,
       code: code || 'phone_number_in_use',
+      raw,
+    };
+  }
+
+  if (
+    code === 'rate_limit_exceeded'
+    || combined.includes('rate_limit_exceeded')
+    || combined.includes('too many phone verification requests')
+    || combined.includes('help.openai.com')
+  ) {
+    return {
+      requestId: stringValue(record.requestId),
+      phoneNumber: stringValue(record.phoneNumber || rawRecord.phoneNumber || rawRecord.phone_number),
+      status: 'rate_limited',
+      message: OPENAI_PHONE_RATE_LIMIT_MESSAGE,
+      code: code || 'rate_limit_exceeded',
       raw,
     };
   }

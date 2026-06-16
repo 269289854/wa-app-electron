@@ -46,13 +46,14 @@ type OpenAIPhoneCheckInput = {
 type OpenAIPhoneCheckResult = {
   requestId: string;
   phoneNumber?: string;
-  status: 'used' | 'sent' | 'available' | 'error';
+  status: 'used' | 'sent' | 'available' | 'error' | 'rate_limited';
   message: string;
   code?: string;
   raw?: unknown;
 };
 
 const mockSMSBowerEnabled = process.env.WA_APP_ELECTRON_MOCK_SMSBOWER === '1';
+const mockOpenAIPhoneMode = process.env.WA_APP_ELECTRON_MOCK_OPENAI_PHONE || '';
 let mockSMSBowerStatusCalls = 0;
 
 const userDataDirOverride = process.env.WA_APP_ELECTRON_USER_DATA_DIR?.trim();
@@ -326,6 +327,21 @@ function stopOpenAIPhoneBridge() {
 }
 
 async function waitForOpenAIPhoneCheck(input: OpenAIPhoneCheckInput) {
+  if (mockOpenAIPhoneMode === 'rate_limit') {
+    return {
+      requestId: input.requestId,
+      phoneNumber: input.phoneNumber,
+      status: 'error',
+      message: "You've made too many phone verification requests. Please try again later or contact us through our help center at help.openai.com.",
+      code: 'rate_limit_exceeded',
+      raw: {
+        message: "You've made too many phone verification requests. Please try again later or contact us through our help center at help.openai.com.",
+        type: 'invalid_request_error',
+        param: null,
+        code: 'rate_limit_exceeded',
+      },
+    } satisfies OpenAIPhoneCheckResult;
+  }
   startOpenAIPhoneBridge();
   const timeoutMs = input.timeoutMs || 120000;
   return new Promise<OpenAIPhoneCheckResult>((resolve, reject) => {
