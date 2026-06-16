@@ -74,12 +74,23 @@ export function normalizeOpenAIPhoneCheckResult(input: unknown): OpenAIPhoneChec
     };
   }
 
-  if (status === 'sent' || status === 'available') {
+  if ((status === 'sent' || status === 'available') && isOpenAIPhoneOTPSuccess(raw)) {
     return {
       requestId: stringValue(record.requestId),
       phoneNumber: stringValue(record.phoneNumber || rawRecord.phoneNumber || rawRecord.phone_number),
-      status,
-      message: message || (status === 'sent' ? 'OpenAI verification code sent' : 'OpenAI phone is available'),
+      status: 'sent',
+      message: message || 'OpenAI verification code sent',
+      code,
+      raw,
+    };
+  }
+
+  if (isOpenAIPhoneOTPSuccess(rawRecord)) {
+    return {
+      requestId: stringValue(record.requestId),
+      phoneNumber: stringValue(record.phoneNumber || rawRecord.phoneNumber || rawRecord.phone_number),
+      status: 'sent',
+      message: message || 'OpenAI verification code sent',
       code,
       raw,
     };
@@ -101,4 +112,10 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown) {
   return typeof value === 'string' ? value : '';
+}
+
+function isOpenAIPhoneOTPSuccess(value: unknown) {
+  const record = asRecord(value);
+  const page = asRecord(record.page);
+  return page.type === 'phone_otp_verification' && Boolean(record.continue_url || record['oai-client-auth-session']);
 }

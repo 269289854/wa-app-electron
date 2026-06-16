@@ -78,12 +78,35 @@ function clickContinue() {
 }
 
 function normalizeOpenAIResponse(raw, ok) {
-  const text = `${raw?.code || ''} ${raw?.message || ''} ${JSON.stringify(raw || '')}`.toLowerCase();
+  const error = openAIError(raw);
+  const code = error.code || raw?.code || '';
+  const message = error.message || raw?.message || '';
+  const text = `${code} ${message} ${JSON.stringify(raw || '')}`.toLowerCase();
   if (text.includes('phone_number_in_use') || text.includes('phone number already in use') || text.includes('电话号码已被使用') || text.includes('该电话号码已被使用')) {
-    return { status: 'used', message: 'openai 手机号已被使用', code: raw?.code || 'phone_number_in_use', raw };
+    return { status: 'used', message: 'openai 手机号已被使用', code: code || 'phone_number_in_use', raw };
   }
-  if (ok) return { status: 'sent', message: 'OpenAI verification request sent', raw };
-  return { status: 'error', message: raw?.message || `OpenAI HTTP error`, code: raw?.code, raw };
+  if (text.includes('rate_limit_exceeded') || text.includes('too many phone verification requests') || text.includes('help.openai.com')) {
+    return { status: 'rate_limited', message: message || 'OpenAI phone verification request limit exceeded', code: code || 'rate_limit_exceeded', raw };
+  }
+  if (text.includes('invalid_state') || text.includes('sign-in session is no longer valid') || text.includes('please start over to continue')) {
+    return { status: 'session_expired', message: message || 'OpenAI sign-in session expired', code: code || 'invalid_state', raw };
+  }
+  if (isOpenAIPhoneOTPSuccess(raw)) return { status: 'sent', message: 'OpenAI verification request sent', raw };
+  return { status: 'error', message: message || (ok ? 'OpenAI did not enter phone OTP verification' : 'OpenAI HTTP error'), code, raw };
+}
+
+function openAIError(raw) {
+  return raw && typeof raw.error === 'object' && raw.error ? raw.error : {};
+}
+
+function isOpenAIPhoneOTPSuccess(raw) {
+  return Boolean(
+    raw
+    && typeof raw === 'object'
+    && raw.page
+    && raw.page.type === 'phone_otp_verification'
+    && (raw.continue_url || raw['oai-client-auth-session'])
+  );
 }
 
 async function readResponse(response) {
