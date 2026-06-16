@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { OPENAI_PHONE_RATE_LIMIT_MESSAGE, normalizeOpenAIPhoneCheckResult } from './openai-phone-check';
+import { OPENAI_PHONE_RATE_LIMIT_MESSAGE, OPENAI_PHONE_SESSION_EXPIRED_MESSAGE, normalizeOpenAIPhoneCheckResult } from './openai-phone-check';
 
 describe('OpenAI phone check result normalization', () => {
   it('marks phone_number_in_use errors as used', () => {
@@ -58,6 +58,29 @@ describe('OpenAI phone check result normalization', () => {
       status: 'rate_limited',
       message: OPENAI_PHONE_RATE_LIMIT_MESSAGE,
       code: 'rate_limit_exceeded',
+    });
+  });
+
+  it('marks expired OpenAI sign-in sessions as session expired', () => {
+    expect(normalizeOpenAIPhoneCheckResult({
+      error: {
+        message: 'Your sign-in session is no longer valid. Please start over to continue.',
+        type: 'invalid_request_error',
+        param: null,
+        code: 'invalid_state',
+      },
+    })).toMatchObject({
+      status: 'session_expired',
+      message: OPENAI_PHONE_SESSION_EXPIRED_MESSAGE,
+      code: 'invalid_state',
+    });
+  });
+
+  it('recognizes expired sign-in wording even without a code', () => {
+    expect(normalizeOpenAIPhoneCheckResult({ message: 'Your sign-in session is no longer valid. Please start over to continue.' })).toMatchObject({
+      status: 'session_expired',
+      message: OPENAI_PHONE_SESSION_EXPIRED_MESSAGE,
+      code: 'invalid_state',
     });
   });
 });

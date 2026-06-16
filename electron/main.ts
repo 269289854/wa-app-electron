@@ -46,7 +46,7 @@ type OpenAIPhoneCheckInput = {
 type OpenAIPhoneCheckResult = {
   requestId: string;
   phoneNumber?: string;
-  status: 'used' | 'sent' | 'available' | 'error' | 'rate_limited';
+  status: 'used' | 'sent' | 'available' | 'error' | 'rate_limited' | 'session_expired';
   message: string;
   code?: string;
   raw?: unknown;
@@ -339,6 +339,23 @@ async function waitForOpenAIPhoneCheck(input: OpenAIPhoneCheckInput) {
         type: 'invalid_request_error',
         param: null,
         code: 'rate_limit_exceeded',
+      },
+    } satisfies OpenAIPhoneCheckResult;
+  }
+  if (mockOpenAIPhoneMode === 'session_expired') {
+    return {
+      requestId: input.requestId,
+      phoneNumber: input.phoneNumber,
+      status: 'error',
+      message: 'Your sign-in session is no longer valid. Please start over to continue.',
+      code: 'invalid_state',
+      raw: {
+        error: {
+          message: 'Your sign-in session is no longer valid. Please start over to continue.',
+          type: 'invalid_request_error',
+          param: null,
+          code: 'invalid_state',
+        },
       },
     } satisfies OpenAIPhoneCheckResult;
   }

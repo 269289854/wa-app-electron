@@ -85,7 +85,7 @@ type OpenAIPhoneCheckInput = {
 type OpenAIPhoneCheckResult = {
   requestId: string;
   phoneNumber?: string;
-  status: 'used' | 'sent' | 'available' | 'error' | 'rate_limited';
+  status: 'used' | 'sent' | 'available' | 'error' | 'rate_limited' | 'session_expired';
   message: string;
   code?: string;
   raw?: unknown;

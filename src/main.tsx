@@ -1057,6 +1057,13 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
         }));
         throw new Error(openAIResult.message);
       }
+      if (openAIResult.status === 'session_expired') {
+        appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check session expired', {
+          phoneNumber: phoneInput.e164_number,
+          result: openAIResult,
+        }));
+        throw new Error(openAIResult.message);
+      }
       if (openAIResult.status === 'error') {
         appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check failed', {
           phoneNumber: phoneInput.e164_number,
@@ -1373,6 +1380,13 @@ async function probeAndRegisterForSMSBower(
   }
   if (openAIResult.status === 'rate_limited') {
     appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check rate limited', {
+      phoneNumber: phoneInput.e164_number,
+      result: openAIResult,
+    }));
+    return { ok: false as const, reason: openAIResult.message, stopTask: true };
+  }
+  if (openAIResult.status === 'session_expired') {
+    appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check session expired', {
       phoneNumber: phoneInput.e164_number,
       result: openAIResult,
     }));
@@ -2170,6 +2184,9 @@ function formatDate(date: Date | null, withTime = false) {
 function errorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
+  if (normalized.includes('invalid_state') || normalized.includes('sign-in session is no longer valid') || normalized.includes('please start over to continue')) {
+    return 'OpenAI 登录已过期，请在插件打开的 OpenAI 页面重新登录后再继续';
+  }
   if (message.includes('OpenAI 已超过请求手机号次数') || normalized.includes('too many phone verification requests') || normalized.includes('rate_limit_exceeded')) {
     return 'OpenAI 已超过请求手机号次数，请稍后再试或关闭 OpenAI 手机号检查';
   }
