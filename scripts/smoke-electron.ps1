@@ -1,14 +1,16 @@
 param(
   [string]$BaseUrl = "https://wa.yizhimeng.uk",
   [string]$Password = $env:WA_APP_ELECTRON_SMOKE_PASSWORD,
-  [int]$DebugPort = 9339
+  [int]$DebugPort = 9339,
+  [ValidateSet("x64", "ia32")][string]$Arch = "x64"
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$exe = Join-Path $root "release\win-unpacked\WA App.exe"
+$unpackedDir = $Arch -eq "ia32" ? "win-ia32-unpacked" : "win-unpacked"
+$exe = Join-Path $root "release\$unpackedDir\WA App.exe"
 if (!(Test-Path $exe)) {
-  throw "Missing unpacked executable. Run npx electron-builder --dir first."
+  throw "Missing unpacked executable ($Arch). Run npx electron-builder --win nsis zip --$Arch first."
 }
 if ([string]::IsNullOrWhiteSpace($Password)) {
   throw "WA_APP_ELECTRON_SMOKE_PASSWORD is required"

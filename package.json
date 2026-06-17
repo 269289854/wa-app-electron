@@ -1,6 +1,6 @@
 {
   "name": "wa-app-electron",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Cross-platform desktop client for wa-app.",
   "type": "module",
@@ -17,6 +17,9 @@
     "smoke:mock-ui": "powershell -ExecutionPolicy Bypass -File scripts/smoke-mock-ui.ps1",
     "smoke:remote-api": "powershell -ExecutionPolicy Bypass -File scripts/smoke-remote-api.ps1",
     "dist": "npm run build && electron-builder",
+    "dist:x64": "electron-builder --win nsis zip --x64",
+    "dist:ia32": "electron-builder --win nsis zip --ia32",
+    "dist:win": "npm run dist:x64 && npm run dist:ia32",
     "start": "npm run build && electron ."
   },
   "dependencies": {
@@ -70,7 +73,19 @@
       "target": [
         "nsis",
         "zip"
-      ]
+      ],
+      "artifactName": "${productName}-${version}-${arch}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "WA App",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
     },
     "mac": {
       "target": [
