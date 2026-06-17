@@ -1975,10 +1975,13 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
 
 function CancelQueuePanel({ notify }: { notify: (kind: Toast['kind'], message: string) => void }) {
   const queryClient = useQueryClient();
+  const [statusTab, setStatusTab] = useState<SMSCancelQueueListStatus>('all');
+  const [page, setPage] = useState(1);
   const now = Date.now();
+  const pageSize = 20;
   const queueQuery = useQuery({
-    queryKey: ['sms-cancel-queue'],
-    queryFn: () => window.smsCancelQueue.list(),
+    queryKey: ['sms-cancel-queue', statusTab, page, pageSize],
+    queryFn: () => window.smsCancelQueue.list({ status: statusTab, page, pageSize }),
     refetchInterval: 5000,
   });
   const statusQuery = useQuery({
@@ -1991,6 +1994,7 @@ function CancelQueuePanel({ notify }: { notify: (kind: Toast['kind'], message: s
     onSuccess: async () => {
       notify('info', '已重新加入取消队列');
       await invalidateSMSCancelQueue(queryClient);
+      await refetchOrBacktrackQueuePage(queueQuery.refetch, page, setPage);
     },
     onError: (error) => notify('error', errorMessage(error)),
   });
@@ -1999,11 +2003,14 @@ function CancelQueuePanel({ notify }: { notify: (kind: Toast['kind'], message: s
     onSuccess: async () => {
       notify('info', '已从本地取消队列移除');
       await invalidateSMSCancelQueue(queryClient);
+      await refetchOrBacktrackQueuePage(queueQuery.refetch, page, setPage);
     },
     onError: (error) => notify('error', errorMessage(error)),
   });
-  const items = queueQuery.data || [];
-  const activeItems = items.filter((item) => item.status === 'pending' || item.status === 'processing' || item.status === 'failed');
+  const listResult = queueQuery.data;
+  const items = listResult?.items || [];
+  const activeItemsCount = statusQuery.data?.active ?? 0;
+  const tabs = cancelQueueTabs(statusQuery.data);
   return (
     <section className="cancel-queue-page">
       <div className="section-title">
@@ -2014,7 +2021,7 @@ function CancelQueuePanel({ notify }: { notify: (kind: Toast['kind'], message: s
         <InfoCard title="队列状态" icon={<ListChecks size={17} />}>
           <dl className="info-grid">
             <div><dt>运行状态</dt><dd>{statusQuery.data?.running ? '运行中' : '未运行'}</dd></div>
-            <div><dt>待处理</dt><dd>{statusQuery.data?.active ?? activeItems.length}</dd></div>
+            <div><dt>待处理</dt><dd>{activeItemsCount}</dd></div>
             <div><dt>已取消</dt><dd>{statusQuery.data?.cancelled ?? 0}</dd></div>
             <div><dt>数据库</dt><dd title={statusQuery.data?.dbPath}>{statusQuery.data?.dbPath || '-'}</dd></div>
           </dl>
@@ -2028,8 +2035,25 @@ function CancelQueuePanel({ notify }: { notify: (kind: Toast['kind'], message: s
         </InfoCard>
       </div>
       <InfoCard title="号码列表" icon={<Contact size={17} />}>
+        <div className="queue-tabs" role="tablist" aria-label="取消队列状态">
+          {tabs.map((tab) => (
+            <button
+              className={statusTab === tab.status ? 'active' : ''}
+              key={tab.status}
+              onClick={() => {
+                setStatusTab(tab.status);
+                setPage(1);
+              }}
+              role="tab"
+              type="button"
+            >
+              {tab.label}
+              <span>{tab.count}</span>
+            </button>
+          ))}
+        </div>
         {queueQuery.isLoading ? <InlineLoading text="加载取消队列" /> : null}
-        {!queueQuery.isLoading && !items.length ? <p className="muted">暂无需要取消的号码。</p> : null}
+        {!queueQuery.isLoading && !items.length ? <p className="muted">当前状态暂无号码。</p> : null}
         <div className="queue-list">
           {items.map((item) => (
             <article className={`queue-item ${item.status}`} key={item.id}>
@@ -2054,6 +2078,11 @@ function CancelQueuePanel({ notify }: { notify: (kind: Toast['kind'], message: s
               </div>
             </article>
           ))}
+        </div>
+        <div className="queue-pagination">
+          <button className="secondary-button" disabled={page <= 1 || queueQuery.isFetching} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button>
+          <span>第 {listResult?.page ?? page} / {listResult?.totalPages ?? 1} 页，共 {listResult?.total ?? 0} 条</span>
+          <button className="secondary-button" disabled={(listResult?.page ?? page) >= (listResult?.totalPages ?? 1) || queueQuery.isFetching} onClick={() => setPage((value) => value + 1)}>下一页</button>
         </div>
       </InfoCard>
     </section>
@@ -2355,6 +2384,28 @@ async function invalidateSMSCancelQueue(client: QueryClient) {
 
 function providerLabel(provider: string) {
   return provider === 'hero-sms' ? 'Hero-SMS' : 'SMSBower';
+}
+
+function cancelQueueTabs(summary?: SMSCancelQueueSummary): Array<{ status: SMSCancelQueueListStatus; label: string; count: number }> {
+  return [
+    { status: 'all', label: '全部', count: summary?.total ?? 0 },
+    { status: 'pending', label: '待取消', count: summary?.pending ?? 0 },
+    { status: 'processing', label: '取消中', count: summary?.processing ?? 0 },
+    { status: 'failed', label: '待重试', count: summary?.failed ?? 0 },
+    { status: 'cancelled', label: '已取消', count: summary?.cancelled ?? 0 },
+    { status: 'removed', label: '已移除', count: summary?.removed ?? 0 },
+  ];
+}
+
+async function refetchOrBacktrackQueuePage(
+  refetch: () => Promise<{ data?: SMSCancelQueueListResult }>,
+  page: number,
+  setPage: React.Dispatch<React.SetStateAction<number>>,
+) {
+  const result = await refetch();
+  if (page > 1 && result.data && result.data.items.length === 0) {
+    setPage((value) => Math.max(1, value - 1));
+  }
 }
 
 function queueStatusLabel(status: SMSCancelQueueStatus) {

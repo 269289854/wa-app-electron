@@ -63,6 +63,39 @@ describe('SMS cancel queue', () => {
     store.close();
   });
 
+  it('paginates queue rows in SQLite without loading every item', () => {
+    const store = createMemoryStore();
+    for (let index = 1; index <= 25; index += 1) {
+      store.enqueue({ provider: 'smsbower', activationId: `page-${index}`, reason: 'bulk', orderedAtMs: index }, index);
+    }
+
+    const first = store.listPage({ page: 1, pageSize: 10 });
+    const third = store.listPage({ page: 3, pageSize: 10 });
+
+    expect(first).toMatchObject({ total: 25, page: 1, pageSize: 10, totalPages: 3 });
+    expect(first.items).toHaveLength(10);
+    expect(first.items.map((item) => item.activationId)).toEqual(['page-1', 'page-2', 'page-3', 'page-4', 'page-5', 'page-6', 'page-7', 'page-8', 'page-9', 'page-10']);
+    expect(third.items.map((item) => item.activationId)).toEqual(['page-21', 'page-22', 'page-23', 'page-24', 'page-25']);
+    store.close();
+  });
+
+  it('filters queue pages by status and sorts finished rows by updated time', () => {
+    const store = createMemoryStore();
+    const pending = store.enqueue({ provider: 'smsbower', activationId: 'pending-1', reason: 'pending' }, 1_000);
+    const cancelledEarly = store.enqueue({ provider: 'smsbower', activationId: 'cancelled-early', reason: 'done' }, 2_000);
+    const cancelledLate = store.enqueue({ provider: 'smsbower', activationId: 'cancelled-late', reason: 'done' }, 3_000);
+    const removed = store.enqueue({ provider: 'smsbower', activationId: 'removed-1', reason: 'removed' }, 4_000);
+
+    store.markCancelled(cancelledEarly.id, 10_000);
+    store.markCancelled(cancelledLate.id, 20_000);
+    store.remove(removed.id, 30_000);
+
+    expect(store.listPage({ status: 'pending' }).items.map((item) => item.id)).toEqual([pending.id]);
+    expect(store.listPage({ status: 'cancelled' }).items.map((item) => item.activationId)).toEqual(['cancelled-late', 'cancelled-early']);
+    expect(store.listPage({ status: 'removed' }).items.map((item) => item.activationId)).toEqual(['removed-1']);
+    store.close();
+  });
+
   it('consumer cancels due orders and marks confirmed cancellations as cancelled', async () => {
     const store = createMemoryStore();
     const item = store.enqueue({ provider: 'smsbower', activationId: 'act-3', reason: 'cleanup' }, 10_000);

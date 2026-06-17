@@ -27,6 +27,22 @@ export type SMSCancelQueueInput = {
   orderedAtMs?: number;
 };
 
+export type SMSCancelQueueListStatus = 'all' | SMSCancelQueueStatus;
+
+export type SMSCancelQueueListInput = {
+  status?: SMSCancelQueueListStatus;
+  page?: number;
+  pageSize?: number;
+};
+
+export type SMSCancelQueueListResult = {
+  items: SMSCancelQueueItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
 export type SMSCancelQueueSummary = {
   total: number;
   active: number;
@@ -102,6 +118,25 @@ export class SMSCancelQueueStore {
         not_before_ms ASC,
         created_at_ms DESC
     `).all().map(rowToItem);
+  }
+
+  listPage(input: SMSCancelQueueListInput = {}): SMSCancelQueueListResult {
+    const status = normalizeListStatus(input.status);
+    const pageSize = boundedInteger(input.pageSize, 1, 100, 20);
+    const page = Math.max(1, Math.round(Number(input.page || 1)) || 1);
+    const offset = (page - 1) * pageSize;
+    const where = status === 'all' ? '' : 'WHERE status = ?';
+    const params = status === 'all' ? [] : [status];
+    const countRow = this.db.prepare(`SELECT COUNT(*) AS total FROM sms_cancel_queue ${where}`).get(...params) as Record<string, unknown> | undefined;
+    const total = Number(countRow?.total || 0);
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const rows = this.db.prepare(`
+      SELECT * FROM sms_cancel_queue
+      ${where}
+      ${listOrderBy(status)}
+      LIMIT ? OFFSET ?
+    `).all(...params, pageSize, offset);
+    return { items: rows.map(rowToItem), total, page, pageSize, totalPages };
   }
 
   status(): SMSCancelQueueSummary {
@@ -239,7 +274,11 @@ export class SMSCancelQueueService {
   }
 
   list() {
-    return this.store.list(true);
+    return this.store.listPage();
+  }
+
+  listPage(input?: SMSCancelQueueListInput) {
+    return this.store.listPage(input);
   }
 
   status() {
@@ -331,6 +370,27 @@ function rowToItem(row: unknown): SMSCancelQueueItem {
 
 function normalizeStatus(value: unknown): SMSCancelQueueStatus {
   return value === 'processing' || value === 'cancelled' || value === 'failed' || value === 'removed' ? value : 'pending';
+}
+
+function normalizeListStatus(value: unknown): SMSCancelQueueListStatus {
+  return value === 'pending' || value === 'processing' || value === 'cancelled' || value === 'failed' || value === 'removed' ? value : 'all';
+}
+
+function listOrderBy(status: SMSCancelQueueListStatus) {
+  if (status === 'cancelled' || status === 'removed') return 'ORDER BY updated_at_ms DESC, created_at_ms DESC';
+  if (status === 'pending' || status === 'processing' || status === 'failed') return 'ORDER BY not_before_ms ASC, created_at_ms ASC';
+  return `
+    ORDER BY
+      CASE status WHEN 'processing' THEN 0 WHEN 'pending' THEN 1 WHEN 'failed' THEN 2 WHEN 'cancelled' THEN 3 ELSE 4 END,
+      not_before_ms ASC,
+      created_at_ms DESC
+  `;
+}
+
+function boundedInteger(value: unknown, min: number, max: number, fallback: number) {
+  const parsed = Math.round(Number(value));
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
 }
 
 function isCancelSuccess(value: unknown) {

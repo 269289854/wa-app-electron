@@ -92,6 +92,7 @@ type SMSPlatformAPI = {
 };
 
 type SMSCancelQueueStatus = 'pending' | 'processing' | 'cancelled' | 'failed' | 'removed';
+type SMSCancelQueueListStatus = 'all' | SMSCancelQueueStatus;
 
 type SMSCancelQueueItem = {
   id: string;
@@ -122,9 +123,23 @@ type SMSCancelQueueSummary = {
   lastError?: string;
 };
 
+type SMSCancelQueueListInput = {
+  status?: SMSCancelQueueListStatus;
+  page?: number;
+  pageSize?: number;
+};
+
+type SMSCancelQueueListResult = {
+  items: SMSCancelQueueItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
 type SMSCancelQueueAPI = {
   status(): Promise<SMSCancelQueueSummary>;
-  list(): Promise<SMSCancelQueueItem[]>;
+  list(input?: SMSCancelQueueListInput): Promise<SMSCancelQueueListResult>;
   enqueue(input: { provider: SMSProvider; activationId: string; phone?: string; reason: string; orderedAtMs?: number }): Promise<SMSCancelQueueItem>;
   retry(id: string): Promise<SMSCancelQueueItem>;
   remove(id: string): Promise<SMSCancelQueueItem>;

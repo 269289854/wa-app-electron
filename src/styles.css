@@ -299,6 +299,39 @@ button { cursor: pointer; }
 }
 .field-hint { color: #687382; font-size: 12px; font-weight: 500; }
 .check-row { display: flex !important; grid-template-columns: auto 1fr; align-items: center; color: #293443 !important; font-weight: 500 !important; }
+.queue-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.queue-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #dbe1e8;
+  border-radius: 8px;
+  background: #fff;
+  padding: 7px 10px;
+  color: #293443;
+  font-size: 13px;
+  font-weight: 650;
+}
+.queue-tabs button.active {
+  border-color: #139f53;
+  background: #eaf8ef;
+  color: #11683b;
+}
+.queue-tabs span {
+  min-width: 20px;
+  border-radius: 999px;
+  background: #edf2f7;
+  padding: 1px 6px;
+  color: #475569;
+  font-size: 11px;
+  text-align: center;
+}
+.queue-tabs button.active span { background: #ccefd9; color: #11683b; }
 .queue-list { display: grid; gap: 12px; }
 .queue-item {
   display: grid;
@@ -349,6 +382,16 @@ button { cursor: pointer; }
   padding: 3px 8px;
 }
 .queue-item .inline-actions { grid-column: 1 / -1; }
+.queue-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+  color: #687382;
+  font-size: 13px;
+}
+.queue-pagination span { min-width: 170px; text-align: center; }
 .check-row input { width: auto; min-height: auto; }
 .inline-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .security-status, .service-card { display: grid; gap: 10px; color: #4b5563; margin-bottom: 12px; }

@@ -581,11 +581,14 @@ async function main() {
     checks.platformStopsOnOpenAIRateLimit = true;
     await route(client, '#/cancel-queue', 'Boolean(document.querySelector(".app-shell[data-view=cancel-queue] .cancel-queue-page"))');
     checks.cancelQueueReceivesPlatformFailure = await runInPage(client, `
-      for (let index = 0; index < 30 && !document.body.innerText.includes('act-smoke-1'); index += 1) {
+      let queued = false;
+      for (let index = 0; index < 30 && !queued; index += 1) {
+        const result = await window.smsCancelQueue.list({ status: 'all', page: 1, pageSize: 20 });
+        queued = result.items.some((item) => item.activationId === 'act-smoke-1');
         await new Promise((resolve) => setTimeout(resolve, 250));
       }
+      if (!queued) throw new Error('SMSBower failed order was not added to cancel queue');
       const text = document.body.innerText;
-      if (!text.includes('SMSBower') || !text.includes('act-smoke-1')) throw new Error('SMSBower cancelled order is not visible in cancel queue');
       if (!text.includes('\u5df2\u53d6\u6d88') && !text.includes('\u5f85\u53d6\u6d88')) throw new Error('Cancel queue status is not visible');
       return true;
     `);
@@ -597,6 +600,9 @@ async function main() {
         reason: 'smoke Hero-SMS minimum cancel window',
         orderedAtMs: Date.now(),
       });
+      const pendingTab = [...document.querySelectorAll('.queue-tabs button')].find((button) => button.innerText.includes('\u5f85\u53d6\u6d88'));
+      if (!pendingTab) throw new Error('Pending queue tab is not visible');
+      pendingTab.click();
       for (let index = 0; index < 30 && !document.body.innerText.includes('hero-smoke-1'); index += 1) {
         await new Promise((resolve) => setTimeout(resolve, 250));
       }
@@ -613,6 +619,55 @@ async function main() {
       if (!document.body.innerText.includes('\u5df2\u79fb\u9664')) throw new Error('Queue remove action did not mark item removed');
       return true;
     `);
+    checks.cancelQueueTabsAndPagination = await runInPage(client, `
+      const enqueueMany = async () => {
+        await Promise.all(Array.from({ length: 22 }, (_, offset) => {
+          const index = offset + 1;
+          return window.smsCancelQueue.enqueue({
+            provider: 'hero-sms',
+            activationId: 'hero-page-' + String(index).padStart(2, '0'),
+            phone: '+5700000' + String(index).padStart(2, '0'),
+            reason: 'pagination pending ' + index,
+            orderedAtMs: Date.now() + index,
+          });
+        }));
+      };
+      await enqueueMany();
+      const pendingResult = await window.smsCancelQueue.list({ status: 'pending', page: 1, pageSize: 20 });
+      const pendingPage2 = await window.smsCancelQueue.list({ status: 'pending', page: 2, pageSize: 20 });
+      if (pendingResult.total < 22 || pendingResult.items.length > 20 || pendingResult.totalPages < 2) throw new Error('Queue SQL pagination result is invalid: ' + JSON.stringify(pendingResult));
+      if (!pendingPage2.items.length) throw new Error('Queue SQL pagination page 2 is empty');
+      const queuePage = document.querySelector('.cancel-queue-page');
+      if (!queuePage) throw new Error('Cancel queue page missing');
+      const tabs = [...queuePage.querySelectorAll('.queue-tabs button')];
+      const pendingTab = tabs.find((button) => button.innerText.includes('\u5f85\u53d6\u6d88'));
+      const cancelledTab = tabs.find((button) => button.innerText.includes('\u5df2\u53d6\u6d88'));
+      if (!pendingTab || !cancelledTab) throw new Error('Cancel queue status tabs are not visible');
+      cancelledTab.click();
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      pendingTab.click();
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      let cards = [...queuePage.querySelectorAll('.queue-item')];
+      if (cards.length > 20) throw new Error('SQL pagination should not render more than one page');
+      if (queuePage.innerText.includes('done-page-1')) throw new Error('Pending tab leaked cancelled records');
+      const next = [...queuePage.querySelectorAll('.queue-pagination button')].find((button) => button.innerText.includes('\u4e0b\u4e00\u9875'));
+      if (!next || next.disabled) throw new Error('Next page button is not available for pending queue');
+      next.click();
+      for (let index = 0; index < 30 && !queuePage.innerText.includes('\u7b2c 2 /'); index += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      if (!queuePage.innerText.includes('\u7b2c 2 /')) throw new Error('Next page did not change current page');
+      const previous = [...queuePage.querySelectorAll('.queue-pagination button')].find((button) => button.innerText.includes('\u4e0a\u4e00\u9875'));
+      if (!previous || previous.disabled) throw new Error('Previous page button is not available on page 2');
+      previous.click();
+      for (let index = 0; index < 30 && !queuePage.innerText.includes('\u7b2c 1 /'); index += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      cancelledTab.click();
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (!queuePage.innerText.includes('\u5df2\u53d6\u6d88')) throw new Error('Cancelled tab did not show cancelled state');
+      return true;
+    `, 120000);
     await route(client, '#/settings', 'Boolean(document.querySelector(".app-shell[data-view=settings] .settings-page"))');
     checks.smsProviderSelector = await runInPage(client, `
       const text = document.body.innerText;

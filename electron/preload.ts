@@ -73,7 +73,7 @@ const api = {
   },
   smsCancelQueue: {
     status: () => ipcRenderer.invoke('sms-cancel-queue:status'),
-    list: () => ipcRenderer.invoke('sms-cancel-queue:list'),
+    list: (input?: unknown) => ipcRenderer.invoke('sms-cancel-queue:list', input),
     enqueue: (input: unknown) => ipcRenderer.invoke('sms-cancel-queue:enqueue', input),
     retry: (id: string) => ipcRenderer.invoke('sms-cancel-queue:retry', id),
     remove: (id: string) => ipcRenderer.invoke('sms-cancel-queue:remove', id),

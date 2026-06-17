@@ -28,6 +28,7 @@ import {
   smsCancelQueueDefaultPollIntervalSeconds,
   type SMSCancelQueueInput,
   type SMSCancelQueueItem,
+  type SMSCancelQueueListInput,
 } from './sms-cancel-queue.js';
 import { createSMSPlatformClient, normalizeSMSProvider, smsProviderLabels, type SMSProvider } from './sms-platforms.js';
 
@@ -255,8 +256,8 @@ function smsCancelQueueEnqueue(input: SMSCancelQueueInput) {
   });
 }
 
-function smsCancelQueueList() {
-  return requireSMSCancelQueue().list();
+function smsCancelQueueList(input?: SMSCancelQueueListInput) {
+  return requireSMSCancelQueue().listPage(input);
 }
 
 function smsCancelQueueRetry(id: string) {
@@ -639,7 +640,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('sms-platform:get-status', (_event, id: string) => smsPlatformGetStatus(id));
   ipcMain.handle('sms-platform:set-status', (_event, input: SMSBowerSetStatusInput) => smsPlatformSetStatus(input));
   ipcMain.handle('sms-cancel-queue:status', () => smsCancelQueueStatus());
-  ipcMain.handle('sms-cancel-queue:list', () => smsCancelQueueList());
+  ipcMain.handle('sms-cancel-queue:list', (_event, input?: SMSCancelQueueListInput) => smsCancelQueueList(input));
   ipcMain.handle('sms-cancel-queue:enqueue', (_event, input: SMSCancelQueueInput) => smsCancelQueueEnqueue(input));
   ipcMain.handle('sms-cancel-queue:retry', (_event, id: string) => smsCancelQueueRetry(id));
   ipcMain.handle('sms-cancel-queue:remove', (_event, id: string) => smsCancelQueueRemove(id));
