@@ -8,6 +8,7 @@ export type ClientConfig = {
   localBaseUrl: string;
   localDataDir: string;
   autoStartLocalService: boolean;
+  smsCancelQueuePollIntervalSeconds: number;
   smsProvider: SMSProvider;
   smsbower: SMSBowerPublicConfig;
   hasPassword: boolean;
@@ -72,6 +73,7 @@ export function defaultConfig(userDataDir: string): StoredConfig {
     localBaseUrl: '',
     localDataDir: join(userDataDir, 'wa-app-data'),
     autoStartLocalService: false,
+    smsCancelQueuePollIntervalSeconds: 5,
     smsProvider: 'smsbower',
     smsbower: defaultSMSBowerConfig(),
     windowState: { width: 1320, height: 860 },
@@ -87,6 +89,7 @@ export function normalizeConfig(config: Partial<StoredConfig>, userDataDir: stri
     localBaseUrl,
     localDataDir: config.localDataDir || join(userDataDir, 'wa-app-data'),
     autoStartLocalService: Boolean(config.autoStartLocalService),
+    smsCancelQueuePollIntervalSeconds: boundedNumber(config.smsCancelQueuePollIntervalSeconds, 1, 300, 5),
     smsProvider: normalizeSMSProvider(config.smsProvider),
     smsbower: normalizeSMSBowerConfig(config.smsbower),
     encryptedPassword: config.encryptedPassword,
@@ -148,6 +151,7 @@ export function publicConfig(config: StoredConfig): ClientConfig {
     localBaseUrl: config.localBaseUrl,
     localDataDir: config.localDataDir,
     autoStartLocalService: config.autoStartLocalService,
+    smsCancelQueuePollIntervalSeconds: config.smsCancelQueuePollIntervalSeconds,
     smsProvider: config.smsProvider,
     smsbower,
     hasPassword,

@@ -34,6 +34,7 @@ describe('electron config helpers', () => {
     expect(config.mode).toBe('remote');
     expect(config.remoteBaseUrl).toBe('https://wa.yizhimeng.uk');
     expect(config.smsProvider).toBe('smsbower');
+    expect(config.smsCancelQueuePollIntervalSeconds).toBe(5);
     expect(config.localDataDir).toContain('wa-app-data');
     expect(config.smsbower).toMatchObject({ enabled: false, targetSuccessCount: 1, maxOrders: 3, numberIntervalSeconds: 0, openAIPhoneCheckEnabled: false });
     expect(config.windowState).toEqual({ width: 1320, height: 860 });
@@ -46,6 +47,7 @@ describe('electron config helpers', () => {
       localBaseUrl: 'http://127.0.0.1:9000///healthz',
       localDataDir: '',
       autoStartLocalService: 1 as unknown as boolean,
+      smsCancelQueuePollIntervalSeconds: 999,
       windowState: { width: 9999, height: 12, maximized: true },
     }, 'C:/data');
 
@@ -55,6 +57,7 @@ describe('electron config helpers', () => {
     expect(config.localDataDir.replaceAll('\\', '/')).toContain('C:/data');
     expect(config.localDataDir.replaceAll('\\', '/')).toContain('wa-app-data');
     expect(config.autoStartLocalService).toBe(true);
+    expect(config.smsCancelQueuePollIntervalSeconds).toBe(300);
     expect(config.windowState).toMatchObject({ width: 2400, height: 680, maximized: true });
   });
 

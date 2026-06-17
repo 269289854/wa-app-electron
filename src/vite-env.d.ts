@@ -9,6 +9,7 @@ type ClientConfig = {
   localBaseUrl: string;
   localDataDir: string;
   autoStartLocalService: boolean;
+  smsCancelQueuePollIntervalSeconds: number;
   smsProvider: SMSProvider;
   smsbower: SMSBowerPublicConfig;
   hasPassword: boolean;
@@ -90,6 +91,45 @@ type SMSPlatformAPI = {
   stopRegistrationTask?(): Promise<void>;
 };
 
+type SMSCancelQueueStatus = 'pending' | 'processing' | 'cancelled' | 'failed' | 'removed';
+
+type SMSCancelQueueItem = {
+  id: string;
+  provider: SMSProvider;
+  activationId: string;
+  phone: string;
+  reason: string;
+  orderedAtMs: number;
+  notBeforeMs: number;
+  status: SMSCancelQueueStatus;
+  attempts: number;
+  lastError: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+};
+
+type SMSCancelQueueSummary = {
+  total: number;
+  active: number;
+  pending: number;
+  processing: number;
+  failed: number;
+  cancelled: number;
+  removed: number;
+  nextDueAtMs: number;
+  dbPath: string;
+  running: boolean;
+  lastError?: string;
+};
+
+type SMSCancelQueueAPI = {
+  status(): Promise<SMSCancelQueueSummary>;
+  list(): Promise<SMSCancelQueueItem[]>;
+  enqueue(input: { provider: SMSProvider; activationId: string; phone?: string; reason: string; orderedAtMs?: number }): Promise<SMSCancelQueueItem>;
+  retry(id: string): Promise<SMSCancelQueueItem>;
+  remove(id: string): Promise<SMSCancelQueueItem>;
+};
+
 type OpenAIPhoneCheckInput = {
   requestId: string;
   phoneNumber: string;
@@ -128,6 +168,7 @@ interface Window {
     start(): Promise<ServiceStatus>;
     stop(): Promise<ServiceStatus>;
   };
+  smsCancelQueue: SMSCancelQueueAPI;
   smsbower: SMSPlatformAPI;
   smsPlatform: SMSPlatformAPI;
   waDesktop: {
@@ -150,6 +191,7 @@ interface Window {
       stop(): Promise<ServiceStatus>;
     };
     smsPlatform: SMSPlatformAPI;
+    smsCancelQueue: SMSCancelQueueAPI;
     smsbower: SMSPlatformAPI;
   };
 }

@@ -579,6 +579,40 @@ async function main() {
     const rateLimitRegisters = rateLimitOperations.filter((operation) => operation.path === '/api/wa/register');
     if (rateLimitRegisters.length) throw new Error(`OpenAI rate limit scenario still called register: ${JSON.stringify(rateLimitRegisters)}`);
     checks.platformStopsOnOpenAIRateLimit = true;
+    await route(client, '#/cancel-queue', 'Boolean(document.querySelector(".app-shell[data-view=cancel-queue] .cancel-queue-page"))');
+    checks.cancelQueueReceivesPlatformFailure = await runInPage(client, `
+      for (let index = 0; index < 30 && !document.body.innerText.includes('act-smoke-1'); index += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      const text = document.body.innerText;
+      if (!text.includes('SMSBower') || !text.includes('act-smoke-1')) throw new Error('SMSBower cancelled order is not visible in cancel queue');
+      if (!text.includes('\u5df2\u53d6\u6d88') && !text.includes('\u5f85\u53d6\u6d88')) throw new Error('Cancel queue status is not visible');
+      return true;
+    `);
+    checks.cancelQueueHeroPendingAndActions = await runInPage(client, `
+      await window.smsCancelQueue.enqueue({
+        provider: 'hero-sms',
+        activationId: 'hero-smoke-1',
+        phone: '+573244521293',
+        reason: 'smoke Hero-SMS minimum cancel window',
+        orderedAtMs: Date.now(),
+      });
+      for (let index = 0; index < 30 && !document.body.innerText.includes('hero-smoke-1'); index += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      if (!document.body.innerText.includes('Hero-SMS') || !document.body.innerText.includes('hero-smoke-1')) throw new Error('Hero-SMS queued order is not visible');
+      if (!document.body.innerText.includes('\u79d2')) throw new Error('Hero-SMS queued order countdown is not visible');
+      const heroCard = [...document.querySelectorAll('.queue-item')].find((item) => item.innerText.includes('hero-smoke-1'));
+      if (!heroCard) throw new Error('Hero-SMS queue card not found');
+      const buttons = [...heroCard.querySelectorAll('button')];
+      if (buttons.length < 2 || buttons.some((button) => button.disabled)) throw new Error('Queue retry/remove buttons are not ready');
+      buttons[0].click();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      buttons[1].click();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      if (!document.body.innerText.includes('\u5df2\u79fb\u9664')) throw new Error('Queue remove action did not mark item removed');
+      return true;
+    `);
     await route(client, '#/settings', 'Boolean(document.querySelector(".app-shell[data-view=settings] .settings-page"))');
     checks.smsProviderSelector = await runInPage(client, `
       const text = document.body.innerText;

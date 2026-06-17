@@ -22,6 +22,13 @@ import {
   type StoredConfig,
 } from './config.js';
 import { smsbowerWhatsAppService } from './smsbower.js';
+import {
+  createSMSCancelQueueStore,
+  SMSCancelQueueService,
+  smsCancelQueueDefaultPollIntervalSeconds,
+  type SMSCancelQueueInput,
+  type SMSCancelQueueItem,
+} from './sms-cancel-queue.js';
 import { createSMSPlatformClient, normalizeSMSProvider, smsProviderLabels, type SMSProvider } from './sms-platforms.js';
 
 type ApiRequestInput = {
@@ -66,6 +73,8 @@ let mainWindow: BrowserWindow | null = null;
 let localProcess: ChildProcessWithoutNullStreams | null = null;
 let localPort = 0;
 let openAIPhoneBridge: HttpServer | null = null;
+let smsCancelQueue: SMSCancelQueueService | null = null;
+let smsCancelQueueError = '';
 const openAIPhoneBridgePort = 17391;
 const openAIPhoneTasks = new Map<string, {
   input: OpenAIPhoneCheckInput;
@@ -201,6 +210,66 @@ function smsPlatformGetStatus(id: string) {
 
 function smsPlatformSetStatus(input: SMSBowerSetStatusInput) {
   return mockSMSBowerEnabled ? mockSMSBowerSetStatus(input) : getSMSPlatformClient().setStatus(input.id, input.status);
+}
+
+async function initSMSCancelQueue(config = readConfig()) {
+  try {
+    const store = await createSMSCancelQueueStore(join(app.getPath('userData'), 'sms-cancel-queue.sqlite'));
+    smsCancelQueue = new SMSCancelQueueService(store, cancelSMSQueueItem, config.smsCancelQueuePollIntervalSeconds || smsCancelQueueDefaultPollIntervalSeconds);
+    smsCancelQueue.start();
+    smsCancelQueueError = '';
+  } catch (error) {
+    smsCancelQueueError = errorMessage(error);
+    console.error('SMS cancel queue failed:', error);
+  }
+}
+
+function smsCancelQueueStatus() {
+  if (!smsCancelQueue) {
+    return {
+      total: 0,
+      active: 0,
+      pending: 0,
+      processing: 0,
+      failed: 0,
+      cancelled: 0,
+      removed: 0,
+      nextDueAtMs: 0,
+      dbPath: join(app.getPath('userData'), 'sms-cancel-queue.sqlite'),
+      running: false,
+      lastError: smsCancelQueueError,
+    };
+  }
+  return smsCancelQueue.status();
+}
+
+function requireSMSCancelQueue() {
+  if (!smsCancelQueue) throw new Error(smsCancelQueueError || 'SMS cancel queue is not available');
+  return smsCancelQueue;
+}
+
+function smsCancelQueueEnqueue(input: SMSCancelQueueInput) {
+  return requireSMSCancelQueue().enqueue({
+    ...input,
+    provider: normalizeSMSProvider(input.provider),
+  });
+}
+
+function smsCancelQueueList() {
+  return requireSMSCancelQueue().list();
+}
+
+function smsCancelQueueRetry(id: string) {
+  return requireSMSCancelQueue().retry(id);
+}
+
+function smsCancelQueueRemove(id: string) {
+  return requireSMSCancelQueue().remove(id);
+}
+
+async function cancelSMSQueueItem(item: SMSCancelQueueItem) {
+  if (mockSMSBowerEnabled) return mockSMSBowerSetStatus({ id: item.activationId, status: 8 });
+  return getSMSPlatformClient(readConfig(), item.provider).setStatus(item.activationId, 8);
 }
 
 function activeBaseUrl(config = readConfig()) {
@@ -546,10 +615,12 @@ app.whenReady().then(async () => {
   }
   const config = readConfig();
   if (config.mode === 'local' && config.autoStartLocalService) await startLocalService();
+  await initSMSCancelQueue(config);
   ipcMain.handle('wa-config:get', () => publicConfig());
   ipcMain.handle('wa-config:set', (_event, input: ClientConfigPatch) => {
     const next = applyConfigPatch(readConfig(), input);
     writeConfig(next);
+    smsCancelQueue?.setPollInterval(next.smsCancelQueuePollIntervalSeconds);
     return publicConfig(next);
   });
   ipcMain.handle('wa-config:test', (_event, input?: ClientConfigPatch) => testConnection(input));
@@ -567,6 +638,11 @@ app.whenReady().then(async () => {
   ipcMain.handle('sms-platform:number', (_event, input?: SMSBowerNumberInput) => smsPlatformNumber(input));
   ipcMain.handle('sms-platform:get-status', (_event, id: string) => smsPlatformGetStatus(id));
   ipcMain.handle('sms-platform:set-status', (_event, input: SMSBowerSetStatusInput) => smsPlatformSetStatus(input));
+  ipcMain.handle('sms-cancel-queue:status', () => smsCancelQueueStatus());
+  ipcMain.handle('sms-cancel-queue:list', () => smsCancelQueueList());
+  ipcMain.handle('sms-cancel-queue:enqueue', (_event, input: SMSCancelQueueInput) => smsCancelQueueEnqueue(input));
+  ipcMain.handle('sms-cancel-queue:retry', (_event, id: string) => smsCancelQueueRetry(id));
+  ipcMain.handle('sms-cancel-queue:remove', (_event, id: string) => smsCancelQueueRemove(id));
   ipcMain.handle('smsbower:status', () => smsPlatformStatus());
   ipcMain.handle('smsbower:balance', () => smsPlatformBalance());
   ipcMain.handle('smsbower:countries', (_event, input?: SMSPlatformProviderInput) => smsPlatformCountries(input));
@@ -580,6 +656,8 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   stopLocalService();
   stopOpenAIPhoneBridge();
+  smsCancelQueue?.close();
+  smsCancelQueue = null;
   if (process.platform !== 'darwin') app.quit();
 });
 

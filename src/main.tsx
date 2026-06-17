@@ -9,6 +9,7 @@ import {
   Contact,
   Fingerprint,
   KeyRound,
+  ListChecks,
   Loader2,
   MessageCircle,
   MonitorCog,
@@ -65,7 +66,6 @@ import {
 } from './api';
 import { normalizePhoneInput } from './phone-input';
 import { probeStatus, registrationMethods, statusReason } from './result-model';
-import { cancelSMSBowerActivation, type SMSBowerCancelLogEntry } from './smsbower-cancel';
 import { normalizeOpenAIPhoneCheckResult } from './openai-phone-check';
 import { countryDisplayName, filterSMSBowerCountries, normalizeSMSBowerCountries, type SMSBowerCountry } from './smsbower-countries';
 import type { AccountMessage, ClientProfile, WAAccount, WorkflowResponse } from './types';
@@ -80,7 +80,7 @@ const queryClient = new QueryClient({
 });
 
 type Toast = { id: number; kind: 'success' | 'error' | 'info'; message: string };
-type View = 'chats' | 'account' | 'add' | 'settings';
+type View = 'chats' | 'account' | 'add' | 'settings' | 'cancel-queue';
 
 function App() {
   return (
@@ -99,7 +99,7 @@ function App() {
 function DesktopApp() {
   const navigate = useNavigate();
   const routeView = useParams<{ view?: string }>().view;
-  const view = routeView === 'account' || routeView === 'add' || routeView === 'settings' || routeView === 'chats' ? routeView : 'chats';
+  const view = routeView === 'account' || routeView === 'add' || routeView === 'settings' || routeView === 'chats' || routeView === 'cancel-queue' ? routeView : 'chats';
   const setView = (next: View) => navigate(`/${next}`);
   const [selectedAccountID, setSelectedAccountID] = useState('');
   const [selectedContactID, setSelectedContactID] = useState('');
@@ -149,6 +149,11 @@ function DesktopApp() {
   const accounts = loadedAccounts.length ? loadedAccounts : pageAccounts;
   const filteredAccounts = useMemo(() => filterAccounts(accounts, accountSearch), [accountSearch, accounts]);
   const connections = useMemo(() => indexConnections(connectionsQuery.data), [connectionsQuery.data]);
+  const cancelQueueStatusQuery = useQuery({
+    queryKey: ['sms-cancel-queue-status'],
+    queryFn: () => window.smsCancelQueue.status(),
+    refetchInterval: 5000,
+  });
 
   useEffect(() => {
     if (!selectedAccountID && filteredAccounts[0]) setSelectedAccountID(accountID(filteredAccounts[0]));
@@ -217,6 +222,10 @@ function DesktopApp() {
             <ShieldCheck size={16} />
             账号
           </button>
+          <button className={view === 'cancel-queue' ? 'active' : ''} onClick={() => setView('cancel-queue')}>
+            <ListChecks size={16} />
+            取消队列{cancelQueueStatusQuery.data?.active ? ` (${cancelQueueStatusQuery.data.active})` : ''}
+          </button>
           <button className={view === 'settings' ? 'active' : ''} onClick={() => setView('settings')}>
             <Settings size={16} />
             设置
@@ -255,6 +264,9 @@ function DesktopApp() {
             </div>
             <div className="view-pane" hidden={view !== 'settings'}>
               <SettingsPanel notify={notify} compact={false} />
+            </div>
+            <div className="view-pane" hidden={view !== 'cancel-queue'}>
+              <CancelQueuePanel notify={notify} />
             </div>
             <div className="view-pane" hidden={view !== 'chats'}>
               <ChatPanel
@@ -1017,15 +1029,17 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
             reason: cancelReason,
           }));
         } else if (!completed && cancelReason) {
-          setPlatformState((state) => ({ ...state, message: `Cancelling ${platformName} order ${number.activationId}` }));
-          await cancelSMSBowerOrder(
+          setPlatformState((state) => ({ ...state, message: `Queueing ${platformName} order ${number.activationId} for cancellation` }));
+          await enqueueSMSCancelOrder(
             number.activationId,
+            number.phone,
             cancelReason,
+            config.provider,
             platformName,
             orderedAtMs,
             setDebugExchanges,
-            (message) => setPlatformState((state) => ({ ...state, message })),
           );
+          setPlatformState((state) => ({ ...state, message: `${platformName} order ${number.activationId} queued for cancellation` }));
         }
       }
       if (stopPlatformRef.current) break;
@@ -1312,6 +1326,7 @@ type SettingsForm = {
   remoteBaseUrl: string;
   localDataDir: string;
   autoStartLocalService: boolean;
+  smsCancelQueuePollIntervalSeconds: number;
   password: string;
   smsProvider: SMSProvider;
   smsbowerApiKey: string;
@@ -1485,41 +1500,31 @@ function smsbowerPriceErrorMessage(prices: SMSBowerPrice[], config: SMSBowerPubl
   return `SMSBower 没有符合 ${config.minPrice}-${config.maxPrice} 的 WhatsApp 号码，请调整价格范围或更换国家。可用价格：${summary}`;
 }
 
-async function cancelSMSBowerOrder(
+async function enqueueSMSCancelOrder(
   activationId: string,
+  phone: string,
   reason: string,
+  provider: SMSProvider,
   platformName: string,
   orderedAtMs: number,
   setDebugExchanges: React.Dispatch<React.SetStateAction<DebugExchange[]>>,
-  onStatus?: (message: string) => void,
 ) {
-  return cancelSMSBowerActivation(
+  const exchange = debugRequest(`${platformName} enqueue cancel`, 'sms-cancel-queue:enqueue', {
+    provider,
     activationId,
+    phone,
     reason,
-    (input) => window.smsPlatform.setStatus(input),
-    (entry) => {
-      if (entry.earlyCancel) {
-        const seconds = Math.ceil(entry.earlyCancel.waitMs / 1000);
-        onStatus?.(`等待 ${platformName} 最短可取消时间 ${seconds} 秒后取消订单 ${activationId}`);
-      }
-      appendDebugExchange(setDebugExchanges, smsbowerCancelExchange(entry, platformName));
-    },
-    undefined,
-    { orderedAtMs },
-  );
-}
-
-function smsbowerCancelExchange(entry: SMSBowerCancelLogEntry, platformName = 'SMSBower'): DebugExchange {
-  const exchange = debugRequest(`${platformName} setStatus cancel`, 'sms-platform:setStatus', {
-    id: entry.id,
-    status: entry.status,
-    reason: entry.reason,
-    attempt: entry.attempt,
-    earlyCancel: entry.earlyCancel,
+    orderedAtMs,
   });
-  if (entry.response !== undefined) return { ...exchange, response: sanitizeDebugValue(entry.response) };
-  if (entry.error !== undefined) return { ...exchange, error: debugError(entry.error) };
-  return exchange;
+  appendDebugExchange(setDebugExchanges, exchange);
+  try {
+    const item = await window.smsCancelQueue.enqueue({ provider, activationId, phone, reason, orderedAtMs });
+    patchDebugExchange(setDebugExchanges, exchange, { ...exchange, response: sanitizeDebugValue(item) });
+    return item;
+  } catch (error) {
+    patchDebugExchange(setDebugExchanges, exchange, { ...exchange, error: debugError(error) });
+    throw error;
+  }
 }
 
 const otpSubmitMaxAttempts = 3;
@@ -1805,6 +1810,7 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
     remoteBaseUrl: '',
     localDataDir: '',
     autoStartLocalService: false,
+    smsCancelQueuePollIntervalSeconds: 5,
     password: '',
     smsProvider: 'smsbower',
     smsbowerApiKey: '',
@@ -1836,6 +1842,7 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
       remoteBaseUrl: configQuery.data.remoteBaseUrl,
       localDataDir: configQuery.data.localDataDir,
       autoStartLocalService: configQuery.data.autoStartLocalService,
+      smsCancelQueuePollIntervalSeconds: configQuery.data.smsCancelQueuePollIntervalSeconds,
       smsProvider: configQuery.data.smsProvider,
       smsbower: {
         enabled: configQuery.data.smsbower.enabled,
@@ -1924,6 +1931,10 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
               <input checked={form.autoStartLocalService} onChange={(event) => setForm({ ...form, autoStartLocalService: event.target.checked })} type="checkbox" />
               本地模式启动时自动启动服务
             </label>
+            <label>
+              取消队列扫描间隔（秒）
+              <input value={form.smsCancelQueuePollIntervalSeconds} onChange={(event) => setForm({ ...form, smsCancelQueuePollIntervalSeconds: Number(event.target.value) })} type="number" min="1" max="300" />
+            </label>
             <SMSBowerSettingsFields
               form={form}
               setForm={setForm}
@@ -1958,6 +1969,93 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
           </div>
         </InfoCard>
       </div>
+    </section>
+  );
+}
+
+function CancelQueuePanel({ notify }: { notify: (kind: Toast['kind'], message: string) => void }) {
+  const queryClient = useQueryClient();
+  const now = Date.now();
+  const queueQuery = useQuery({
+    queryKey: ['sms-cancel-queue'],
+    queryFn: () => window.smsCancelQueue.list(),
+    refetchInterval: 5000,
+  });
+  const statusQuery = useQuery({
+    queryKey: ['sms-cancel-queue-status'],
+    queryFn: () => window.smsCancelQueue.status(),
+    refetchInterval: 5000,
+  });
+  const retryMutation = useMutation({
+    mutationFn: (id: string) => window.smsCancelQueue.retry(id),
+    onSuccess: async () => {
+      notify('info', '已重新加入取消队列');
+      await invalidateSMSCancelQueue(queryClient);
+    },
+    onError: (error) => notify('error', errorMessage(error)),
+  });
+  const removeMutation = useMutation({
+    mutationFn: (id: string) => window.smsCancelQueue.remove(id),
+    onSuccess: async () => {
+      notify('info', '已从本地取消队列移除');
+      await invalidateSMSCancelQueue(queryClient);
+    },
+    onError: (error) => notify('error', errorMessage(error)),
+  });
+  const items = queueQuery.data || [];
+  const activeItems = items.filter((item) => item.status === 'pending' || item.status === 'processing' || item.status === 'failed');
+  return (
+    <section className="cancel-queue-page">
+      <div className="section-title">
+        <h1>取消队列</h1>
+        <p>接码订单会在到达可取消时间后自动取消，Hero-SMS 会等待平台最短取消时间。</p>
+      </div>
+      <div className="dashboard-grid">
+        <InfoCard title="队列状态" icon={<ListChecks size={17} />}>
+          <dl className="info-grid">
+            <div><dt>运行状态</dt><dd>{statusQuery.data?.running ? '运行中' : '未运行'}</dd></div>
+            <div><dt>待处理</dt><dd>{statusQuery.data?.active ?? activeItems.length}</dd></div>
+            <div><dt>已取消</dt><dd>{statusQuery.data?.cancelled ?? 0}</dd></div>
+            <div><dt>数据库</dt><dd title={statusQuery.data?.dbPath}>{statusQuery.data?.dbPath || '-'}</dd></div>
+          </dl>
+          {statusQuery.data?.lastError ? <p className="field-hint">{statusQuery.data.lastError}</p> : null}
+        </InfoCard>
+        <InfoCard title="下一次处理" icon={<RefreshCw size={17} />}>
+          <div className="service-card">
+            <p><strong>下次到期：</strong>{statusQuery.data?.nextDueAtMs ? formatDate(new Date(statusQuery.data.nextDueAtMs), true) : '-'}</p>
+            <p><strong>剩余时间：</strong>{statusQuery.data?.nextDueAtMs ? countdownLabel(statusQuery.data.nextDueAtMs, now) : '-'}</p>
+          </div>
+        </InfoCard>
+      </div>
+      <InfoCard title="号码列表" icon={<Contact size={17} />}>
+        {queueQuery.isLoading ? <InlineLoading text="加载取消队列" /> : null}
+        {!queueQuery.isLoading && !items.length ? <p className="muted">暂无需要取消的号码。</p> : null}
+        <div className="queue-list">
+          {items.map((item) => (
+            <article className={`queue-item ${item.status}`} key={item.id}>
+              <div>
+                <strong>{providerLabel(item.provider)} · {item.phone || '-'}</strong>
+                <small>{item.activationId}</small>
+              </div>
+              <div>
+                <span className={`queue-status ${item.status}`}>{queueStatusLabel(item.status)}</span>
+                <small>{item.status === 'pending' || item.status === 'failed' ? countdownLabel(item.notBeforeMs, now) : formatDate(new Date(item.updatedAtMs), true)}</small>
+              </div>
+              <p>{item.reason}</p>
+              {item.lastError ? <p className="queue-error">{item.lastError}</p> : null}
+              <div className="queue-meta">
+                <span>尝试 {item.attempts}</span>
+                <span>下单 {formatDate(new Date(item.orderedAtMs), true)}</span>
+                <span>可取消 {formatDate(new Date(item.notBeforeMs), true)}</span>
+              </div>
+              <div className="inline-actions">
+                <button className="secondary-button" disabled={retryMutation.isPending || item.status === 'processing' || item.status === 'removed'} onClick={() => retryMutation.mutate(item.id)}>重试</button>
+                <button className="secondary-button" disabled={removeMutation.isPending || item.status === 'processing' || item.status === 'removed'} onClick={() => removeMutation.mutate(item.id)}>移除</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </InfoCard>
     </section>
   );
 }
@@ -2246,6 +2344,38 @@ function initials(label: string) {
 function formatDate(date: Date | null, withTime = false) {
   if (!date) return '';
   return withTime ? date.toLocaleString() : date.toLocaleDateString();
+}
+
+async function invalidateSMSCancelQueue(client: QueryClient) {
+  await Promise.all([
+    client.invalidateQueries({ queryKey: ['sms-cancel-queue'] }),
+    client.invalidateQueries({ queryKey: ['sms-cancel-queue-status'] }),
+  ]);
+}
+
+function providerLabel(provider: string) {
+  return provider === 'hero-sms' ? 'Hero-SMS' : 'SMSBower';
+}
+
+function queueStatusLabel(status: SMSCancelQueueStatus) {
+  const labels: Record<SMSCancelQueueStatus, string> = {
+    pending: '待取消',
+    processing: '取消中',
+    cancelled: '已取消',
+    failed: '待重试',
+    removed: '已移除',
+  };
+  return labels[status] || status;
+}
+
+function countdownLabel(targetMs: number, nowMs = Date.now()) {
+  const remainingMs = Math.max(0, targetMs - nowMs);
+  if (remainingMs <= 0) return '已到期';
+  const totalSeconds = Math.ceil(remainingMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes <= 0) return `${seconds} 秒`;
+  return `${minutes} 分 ${seconds} 秒`;
 }
 
 function errorMessage(error: unknown) {
