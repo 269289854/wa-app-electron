@@ -792,7 +792,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
   const configQuery = useQuery({ queryKey: ['config'], queryFn: () => window.waConfig.get() });
   const smsbowerCountriesQuery = useQuery({
     queryKey: ['sms-platform-countries', configQuery.data?.smsProvider],
-    queryFn: async () => normalizeSMSBowerCountries(await window.smsPlatform.getCountries()),
+    queryFn: async () => normalizeSMSBowerCountries(await window.smsPlatform.getCountries({ provider: configQuery.data?.smsProvider })),
     enabled: Boolean(configQuery.data?.smsbower.configured),
     staleTime: 60 * 60 * 1000,
   });
@@ -1804,7 +1804,7 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
   });
   const smsbowerCountriesQuery = useQuery({
     queryKey: ['sms-platform-countries', form.smsProvider],
-    queryFn: async () => normalizeSMSBowerCountries(await window.smsPlatform.getCountries()),
+    queryFn: async () => normalizeSMSBowerCountries(await window.smsPlatform.getCountries({ provider: form.smsProvider })),
     enabled: Boolean(form.smsProvider === 'hero-sms' ? configQuery.data?.smsbower.hasHeroSMSApiKey : configQuery.data?.smsbower.hasApiKey),
     staleTime: 60 * 60 * 1000,
   });

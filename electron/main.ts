@@ -22,7 +22,7 @@ import {
   type StoredConfig,
 } from './config.js';
 import { smsbowerWhatsAppService } from './smsbower.js';
-import { createSMSPlatformClient, smsProviderLabels, type SMSProvider } from './sms-platforms.js';
+import { createSMSPlatformClient, normalizeSMSProvider, smsProviderLabels, type SMSProvider } from './sms-platforms.js';
 
 type ApiRequestInput = {
   path: string;
@@ -34,8 +34,9 @@ type ApiRequestInput = {
 
 type ClientConfigPatch = Partial<ClientConfig> & { password?: string; smsbowerApiKey?: string; heroSMSApiKey?: string };
 
-type SMSBowerPriceInput = { country?: string };
-type SMSBowerNumberInput = { country?: string; minPrice?: number; maxPrice?: number; providerIds?: string[] };
+type SMSPlatformProviderInput = { provider?: SMSProvider };
+type SMSBowerPriceInput = SMSPlatformProviderInput & { country?: string };
+type SMSBowerNumberInput = SMSPlatformProviderInput & { country?: string; minPrice?: number; maxPrice?: number; providerIds?: string[] };
 type SMSBowerSetStatusInput = { id: string; status: number };
 type OpenAIPhoneCheckInput = {
   requestId: string;
@@ -116,8 +117,8 @@ function getPassword(config = readConfig()) {
   return decodePassword(config, safeStorage);
 }
 
-function getSMSPlatformClient(config = readConfig()) {
-  const provider = config.smsProvider;
+function getSMSPlatformClient(config = readConfig(), providerOverride?: SMSProvider) {
+  const provider = providerOverride || config.smsProvider;
   const apiKey = provider === 'hero-sms' ? decodeHeroSMSApiKey(config, safeStorage) : decodeSMSBowerApiKey(config, safeStorage);
   const label = smsProviderLabels[provider];
   if (!apiKey) throw new Error(`${label} API key is not configured`);
@@ -146,8 +147,8 @@ function mockSMSBowerSetStatus(input: SMSBowerSetStatusInput) {
   return input.status === 6 ? 'ACCESS_READY' : 'ACCESS_CANCEL';
 }
 
-function currentSMSProvider(config = readConfig()): SMSProvider {
-  return config.smsProvider;
+function currentSMSProvider(config = readConfig(), providerOverride?: unknown): SMSProvider {
+  return providerOverride ? normalizeSMSProvider(providerOverride) : config.smsProvider;
 }
 
 function smsPlatformStatus() {
@@ -164,29 +165,34 @@ function smsPlatformBalance() {
   return mockSMSBowerEnabled ? '100.00' : getSMSPlatformClient().getBalance();
 }
 
-function smsPlatformCountries() {
-  return mockSMSBowerEnabled ? mockSMSBowerCountries() : getSMSPlatformClient().getCountries();
+function smsPlatformCountries(input?: SMSPlatformProviderInput) {
+  if (mockSMSBowerEnabled) return mockSMSBowerCountries();
+  const config = readConfig();
+  const provider = input?.provider ? currentSMSProvider(config, input.provider) : currentSMSProvider(config);
+  return getSMSPlatformClient(config, provider).getCountries();
 }
 
 function smsPlatformPrices(input?: SMSBowerPriceInput) {
   if (mockSMSBowerEnabled) return mockSMSBowerPrices();
   const config = readConfig();
+  const provider = input?.provider ? currentSMSProvider(config, input.provider) : currentSMSProvider(config);
   const country = input?.country || config.smsbower.country;
-  const label = smsProviderLabels[currentSMSProvider(config)];
+  const label = smsProviderLabels[provider];
   if (!country) throw new Error(`${label} country is not configured`);
-  return getSMSPlatformClient(config).getPrices(country, smsbowerWhatsAppService);
+  return getSMSPlatformClient(config, provider).getPrices(country, smsbowerWhatsAppService);
 }
 
 function smsPlatformNumber(input?: SMSBowerNumberInput) {
   if (mockSMSBowerEnabled) return mockSMSBowerNumber();
   const config = readConfig();
+  const provider = input?.provider ? currentSMSProvider(config, input.provider) : currentSMSProvider(config);
   const country = input?.country || config.smsbower.country;
   const minPrice = Number(input?.minPrice ?? config.smsbower.minPrice);
   const maxPrice = Number(input?.maxPrice ?? config.smsbower.maxPrice);
-  const label = smsProviderLabels[currentSMSProvider(config)];
+  const label = smsProviderLabels[provider];
   if (!country) throw new Error(`${label} country is not configured`);
   if (!Number.isFinite(maxPrice) || maxPrice <= 0) throw new Error(`${label} max price is not configured`);
-  return getSMSPlatformClient(config).getNumber({ country, minPrice, maxPrice, providerIds: input?.providerIds, service: smsbowerWhatsAppService });
+  return getSMSPlatformClient(config, provider).getNumber({ country, minPrice, maxPrice, providerIds: input?.providerIds, service: smsbowerWhatsAppService });
 }
 
 function smsPlatformGetStatus(id: string) {
@@ -556,14 +562,14 @@ app.whenReady().then(async () => {
   ipcMain.handle('wa-service:stop', () => stopLocalService());
   ipcMain.handle('sms-platform:status', () => smsPlatformStatus());
   ipcMain.handle('sms-platform:balance', () => smsPlatformBalance());
-  ipcMain.handle('sms-platform:countries', () => smsPlatformCountries());
+  ipcMain.handle('sms-platform:countries', (_event, input?: SMSPlatformProviderInput) => smsPlatformCountries(input));
   ipcMain.handle('sms-platform:prices', (_event, input?: SMSBowerPriceInput) => smsPlatformPrices(input));
   ipcMain.handle('sms-platform:number', (_event, input?: SMSBowerNumberInput) => smsPlatformNumber(input));
   ipcMain.handle('sms-platform:get-status', (_event, id: string) => smsPlatformGetStatus(id));
   ipcMain.handle('sms-platform:set-status', (_event, input: SMSBowerSetStatusInput) => smsPlatformSetStatus(input));
   ipcMain.handle('smsbower:status', () => smsPlatformStatus());
   ipcMain.handle('smsbower:balance', () => smsPlatformBalance());
-  ipcMain.handle('smsbower:countries', () => smsPlatformCountries());
+  ipcMain.handle('smsbower:countries', (_event, input?: SMSPlatformProviderInput) => smsPlatformCountries(input));
   ipcMain.handle('smsbower:prices', (_event, input?: SMSBowerPriceInput) => smsPlatformPrices(input));
   ipcMain.handle('smsbower:number', (_event, input?: SMSBowerNumberInput) => smsPlatformNumber(input));
   ipcMain.handle('smsbower:get-status', (_event, id: string) => smsPlatformGetStatus(id));

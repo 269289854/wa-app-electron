@@ -81,9 +81,9 @@ type SMSBowerPrice = {
 type SMSPlatformAPI = {
   status(): Promise<{ configured: boolean; config: SMSBowerPublicConfig; provider?: SMSProvider; label?: string }>;
   getBalance(): Promise<string>;
-  getCountries(): Promise<unknown>;
-  getPrices(input?: { country?: string }): Promise<SMSBowerPrice[]>;
-  getNumber(input?: { country?: string; minPrice?: number; maxPrice?: number; providerIds?: string[] }): Promise<SMSBowerNumberResult>;
+  getCountries(input?: { provider?: SMSProvider }): Promise<unknown>;
+  getPrices(input?: { provider?: SMSProvider; country?: string }): Promise<SMSBowerPrice[]>;
+  getNumber(input?: { provider?: SMSProvider; country?: string; minPrice?: number; maxPrice?: number; providerIds?: string[] }): Promise<SMSBowerNumberResult>;
   getStatus(id: string): Promise<SMSBowerStatusResult>;
   setStatus(input: { id: string; status: number }): Promise<string>;
   startRegistrationTask?(input?: unknown): Promise<{ successes: number; orders: number; stopped: boolean }>;

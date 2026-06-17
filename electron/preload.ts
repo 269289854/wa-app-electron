@@ -63,7 +63,7 @@ const api = {
   smsPlatform: {
     status: () => ipcRenderer.invoke('sms-platform:status'),
     getBalance: () => ipcRenderer.invoke('sms-platform:balance'),
-    getCountries: () => ipcRenderer.invoke('sms-platform:countries'),
+    getCountries: (input?: unknown) => ipcRenderer.invoke('sms-platform:countries', input),
     getPrices: (input?: unknown) => ipcRenderer.invoke('sms-platform:prices', input),
     getNumber: (input?: unknown) => ipcRenderer.invoke('sms-platform:number', input),
     getStatus: (id: string) => ipcRenderer.invoke('sms-platform:get-status', id),
