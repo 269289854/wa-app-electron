@@ -892,8 +892,10 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
       const numberExchange = debugRequest(`${platformName} getNumber`, 'sms-platform:getNumber', numberRequest);
       appendDebugExchange(setDebugExchanges, numberExchange);
       let number: SMSBowerNumberResult;
+      let orderedAtMs: number;
       try {
         number = await window.smsPlatform.getNumber({ country: config.country, minPrice: config.minPrice, maxPrice: config.maxPrice, providerIds });
+        orderedAtMs = Date.now();
         patchDebugExchange(setDebugExchanges, numberExchange, { ...numberExchange, response: sanitizeDebugValue(number) });
       } catch (error) {
         patchDebugExchange(setDebugExchanges, numberExchange, { ...numberExchange, error: debugError(error) });
@@ -1016,7 +1018,14 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
           }));
         } else if (!completed && cancelReason) {
           setPlatformState((state) => ({ ...state, message: `Cancelling ${platformName} order ${number.activationId}` }));
-          await cancelSMSBowerOrder(number.activationId, cancelReason, platformName, setDebugExchanges);
+          await cancelSMSBowerOrder(
+            number.activationId,
+            cancelReason,
+            platformName,
+            orderedAtMs,
+            setDebugExchanges,
+            (message) => setPlatformState((state) => ({ ...state, message })),
+          );
         }
       }
       if (stopPlatformRef.current) break;
@@ -1480,13 +1489,23 @@ async function cancelSMSBowerOrder(
   activationId: string,
   reason: string,
   platformName: string,
+  orderedAtMs: number,
   setDebugExchanges: React.Dispatch<React.SetStateAction<DebugExchange[]>>,
+  onStatus?: (message: string) => void,
 ) {
   return cancelSMSBowerActivation(
     activationId,
     reason,
     (input) => window.smsPlatform.setStatus(input),
-    (entry) => appendDebugExchange(setDebugExchanges, smsbowerCancelExchange(entry, platformName)),
+    (entry) => {
+      if (entry.earlyCancel) {
+        const seconds = Math.ceil(entry.earlyCancel.waitMs / 1000);
+        onStatus?.(`等待 ${platformName} 最短可取消时间 ${seconds} 秒后取消订单 ${activationId}`);
+      }
+      appendDebugExchange(setDebugExchanges, smsbowerCancelExchange(entry, platformName));
+    },
+    undefined,
+    { orderedAtMs },
   );
 }
 
@@ -1496,6 +1515,7 @@ function smsbowerCancelExchange(entry: SMSBowerCancelLogEntry, platformName = 'S
     status: entry.status,
     reason: entry.reason,
     attempt: entry.attempt,
+    earlyCancel: entry.earlyCancel,
   });
   if (entry.response !== undefined) return { ...exchange, response: sanitizeDebugValue(entry.response) };
   if (entry.error !== undefined) return { ...exchange, error: debugError(entry.error) };
