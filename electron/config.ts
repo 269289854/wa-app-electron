@@ -8,10 +8,13 @@ export type ClientConfig = {
   localBaseUrl: string;
   localDataDir: string;
   autoStartLocalService: boolean;
+  smsProvider: SMSProvider;
   smsbower: SMSBowerPublicConfig;
   hasPassword: boolean;
   authPasswordRef: string;
 };
+
+export type SMSProvider = 'smsbower' | 'hero-sms';
 
 export type SMSBowerPublicConfig = {
   enabled: boolean;
@@ -25,11 +28,16 @@ export type SMSBowerPublicConfig = {
   pollIntervalSeconds: number;
   otpTimeoutSeconds: number;
   hasApiKey: boolean;
+  hasHeroSMSApiKey: boolean;
+  provider: SMSProvider;
+  providerLabel: string;
   configured: boolean;
 };
 
-export type SMSBowerStoredConfig = Omit<SMSBowerPublicConfig, 'hasApiKey' | 'configured'> & {
+export type SMSBowerStoredConfig = Omit<SMSBowerPublicConfig, 'hasApiKey' | 'hasHeroSMSApiKey' | 'provider' | 'providerLabel' | 'configured'> & {
+  provider?: SMSProvider;
   encryptedApiKey?: string;
+  encryptedHeroSMSApiKey?: string;
 };
 
 export type WindowState = {
@@ -55,6 +63,7 @@ export type PasswordCodec = {
 export const defaultRemoteBaseUrl = 'https://wa.yizhimeng.uk';
 export const authPasswordRef = 'electron-safe-storage:wa-app-auth-password';
 export const smsbowerApiKeyRef = 'electron-safe-storage:smsbower-api-key';
+export const heroSMSApiKeyRef = 'electron-safe-storage:hero-sms-api-key';
 
 export function defaultConfig(userDataDir: string): StoredConfig {
   return {
@@ -63,6 +72,7 @@ export function defaultConfig(userDataDir: string): StoredConfig {
     localBaseUrl: '',
     localDataDir: join(userDataDir, 'wa-app-data'),
     autoStartLocalService: false,
+    smsProvider: 'smsbower',
     smsbower: defaultSMSBowerConfig(),
     windowState: { width: 1320, height: 860 },
   };
@@ -77,6 +87,7 @@ export function normalizeConfig(config: Partial<StoredConfig>, userDataDir: stri
     localBaseUrl,
     localDataDir: config.localDataDir || join(userDataDir, 'wa-app-data'),
     autoStartLocalService: Boolean(config.autoStartLocalService),
+    smsProvider: normalizeSMSProvider(config.smsProvider),
     smsbower: normalizeSMSBowerConfig(config.smsbower),
     encryptedPassword: config.encryptedPassword,
     windowState: normalizeWindowState(config.windowState),
@@ -100,6 +111,7 @@ export function defaultSMSBowerConfig(): SMSBowerStoredConfig {
 
 export function normalizeSMSBowerConfig(config?: Partial<SMSBowerStoredConfig>): SMSBowerStoredConfig {
   const fallback = defaultSMSBowerConfig();
+  const provider = normalizeSMSProvider(config?.provider);
   return {
     enabled: Boolean(config?.enabled),
     country: String(config?.country || '').trim(),
@@ -111,7 +123,9 @@ export function normalizeSMSBowerConfig(config?: Partial<SMSBowerStoredConfig>):
     openAIPhoneCheckEnabled: Boolean(config?.openAIPhoneCheckEnabled),
     pollIntervalSeconds: boundedNumber(config?.pollIntervalSeconds, 2, 120, fallback.pollIntervalSeconds),
     otpTimeoutSeconds: boundedNumber(config?.otpTimeoutSeconds, 30, 3600, fallback.otpTimeoutSeconds),
+    provider,
     encryptedApiKey: config?.encryptedApiKey,
+    encryptedHeroSMSApiKey: config?.encryptedHeroSMSApiKey,
   };
 }
 
@@ -127,22 +141,26 @@ export function normalizeWindowState(value?: Partial<WindowState>): WindowState 
 
 export function publicConfig(config: StoredConfig): ClientConfig {
   const hasPassword = Boolean(config.encryptedPassword);
-  const smsbower = publicSMSBowerConfig(config.smsbower);
+  const smsbower = publicSMSBowerConfig(config.smsbower, config.smsProvider);
   return {
     mode: config.mode,
     remoteBaseUrl: config.remoteBaseUrl,
     localBaseUrl: config.localBaseUrl,
     localDataDir: config.localDataDir,
     autoStartLocalService: config.autoStartLocalService,
+    smsProvider: config.smsProvider,
     smsbower,
     hasPassword,
     authPasswordRef: hasPassword ? authPasswordRef : '',
   };
 }
 
-export function publicSMSBowerConfig(config: SMSBowerStoredConfig): SMSBowerPublicConfig {
+export function publicSMSBowerConfig(config: SMSBowerStoredConfig, configuredProvider?: SMSProvider): SMSBowerPublicConfig {
+  const provider = normalizeSMSProvider(configuredProvider || config.provider);
   const hasApiKey = Boolean(config.encryptedApiKey);
-  const configured = Boolean(config.enabled && hasApiKey && config.country && config.maxPrice > 0);
+  const hasHeroSMSApiKey = Boolean(config.encryptedHeroSMSApiKey);
+  const activeHasApiKey = provider === 'hero-sms' ? hasHeroSMSApiKey : hasApiKey;
+  const configured = Boolean(config.enabled && activeHasApiKey && config.country && config.maxPrice > 0);
   return {
     enabled: config.enabled,
     country: config.country,
@@ -155,8 +173,19 @@ export function publicSMSBowerConfig(config: SMSBowerStoredConfig): SMSBowerPubl
     pollIntervalSeconds: config.pollIntervalSeconds,
     otpTimeoutSeconds: config.otpTimeoutSeconds,
     hasApiKey,
+    hasHeroSMSApiKey,
+    provider,
+    providerLabel: providerLabel(provider),
     configured,
   };
+}
+
+export function normalizeSMSProvider(value: unknown): SMSProvider {
+  return value === 'hero-sms' ? 'hero-sms' : 'smsbower';
+}
+
+export function providerLabel(provider: SMSProvider) {
+  return provider === 'hero-sms' ? 'Hero-SMS' : 'SMSBower';
 }
 
 export function normalizeBaseUrl(value: string) {
@@ -214,6 +243,31 @@ export function getSMSBowerApiKey(config: StoredConfig, codec: PasswordCodec) {
   if (!config.smsbower?.encryptedApiKey) return '';
   try {
     const value = Buffer.from(config.smsbower.encryptedApiKey, 'base64');
+    return codec.isEncryptionAvailable() ? codec.decryptString(value) : value.toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
+export function setHeroSMSApiKey(config: StoredConfig, apiKey: string | undefined, codec: PasswordCodec) {
+  if (apiKey === undefined) return config;
+  const smsbower = normalizeSMSBowerConfig(config.smsbower);
+  const trimmed = apiKey.trim();
+  if (!trimmed) {
+    const next = { ...smsbower };
+    delete next.encryptedHeroSMSApiKey;
+    return { ...config, smsbower: next };
+  }
+  const encoded = codec.isEncryptionAvailable()
+    ? codec.encryptString(trimmed).toString('base64')
+    : Buffer.from(trimmed, 'utf8').toString('base64');
+  return { ...config, smsbower: { ...smsbower, encryptedHeroSMSApiKey: encoded } };
+}
+
+export function getHeroSMSApiKey(config: StoredConfig, codec: PasswordCodec) {
+  if (!config.smsbower?.encryptedHeroSMSApiKey) return '';
+  try {
+    const value = Buffer.from(config.smsbower.encryptedHeroSMSApiKey, 'base64');
     return codec.isEncryptionAvailable() ? codec.decryptString(value) : value.toString('utf8');
   } catch {
     return '';

@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 
 type ClientMode = 'remote' | 'local';
+type SMSProvider = 'smsbower' | 'hero-sms';
 
 type ClientConfig = {
   mode: ClientMode;
@@ -8,6 +9,7 @@ type ClientConfig = {
   localBaseUrl: string;
   localDataDir: string;
   autoStartLocalService: boolean;
+  smsProvider: SMSProvider;
   smsbower: SMSBowerPublicConfig;
   hasPassword: boolean;
   authPasswordRef: string;
@@ -25,10 +27,14 @@ type SMSBowerPublicConfig = {
   pollIntervalSeconds: number;
   otpTimeoutSeconds: number;
   hasApiKey: boolean;
+  hasHeroSMSApiKey: boolean;
+  provider: SMSProvider;
+  providerLabel: string;
   configured: boolean;
 };
 
-type SMSBowerConfigPatch = Partial<Omit<SMSBowerPublicConfig, 'hasApiKey' | 'configured'>>;
+type SMSBowerConfigPatch = Partial<Omit<SMSBowerPublicConfig, 'hasApiKey' | 'hasHeroSMSApiKey' | 'providerLabel' | 'configured'>>;
+type ClientConfigPatch = Partial<Omit<ClientConfig, 'smsbower'>> & { smsbower?: SMSBowerConfigPatch; password?: string; smsbowerApiKey?: string; heroSMSApiKey?: string };
 
 type ConnectionTestResult = {
   ok: boolean;
@@ -72,6 +78,18 @@ type SMSBowerPrice = {
   providerId?: string;
 };
 
+type SMSPlatformAPI = {
+  status(): Promise<{ configured: boolean; config: SMSBowerPublicConfig; provider?: SMSProvider; label?: string }>;
+  getBalance(): Promise<string>;
+  getCountries(): Promise<unknown>;
+  getPrices(input?: { country?: string }): Promise<SMSBowerPrice[]>;
+  getNumber(input?: { country?: string; minPrice?: number; maxPrice?: number; providerIds?: string[] }): Promise<SMSBowerNumberResult>;
+  getStatus(id: string): Promise<SMSBowerStatusResult>;
+  setStatus(input: { id: string; status: number }): Promise<string>;
+  startRegistrationTask?(input?: unknown): Promise<{ successes: number; orders: number; stopped: boolean }>;
+  stopRegistrationTask?(): Promise<void>;
+};
+
 type OpenAIPhoneCheckInput = {
   requestId: string;
   phoneNumber: string;
@@ -94,8 +112,8 @@ type OpenAIPhoneCheckResult = {
 interface Window {
   waConfig: {
     get(): Promise<ClientConfig>;
-    set(input: Partial<Omit<ClientConfig, 'smsbower'>> & { smsbower?: SMSBowerConfigPatch; password?: string; smsbowerApiKey?: string }): Promise<ClientConfig>;
-    testConnection(input?: Partial<Omit<ClientConfig, 'smsbower'>> & { smsbower?: SMSBowerConfigPatch; password?: string; smsbowerApiKey?: string }): Promise<ConnectionTestResult>;
+    set(input: ClientConfigPatch): Promise<ClientConfig>;
+    testConnection(input?: ClientConfigPatch): Promise<ConnectionTestResult>;
   };
   waApi: {
     request<T>(input: { path: string; method?: string; body?: unknown; headers?: Record<string, string>; timeoutMs?: number }): Promise<T>;
@@ -110,22 +128,13 @@ interface Window {
     start(): Promise<ServiceStatus>;
     stop(): Promise<ServiceStatus>;
   };
-  smsbower: {
-    status(): Promise<{ configured: boolean; config: SMSBowerPublicConfig }>;
-    getBalance(): Promise<string>;
-    getCountries(): Promise<unknown>;
-    getPrices(input?: { country?: string }): Promise<SMSBowerPrice[]>;
-    getNumber(input?: { country?: string; minPrice?: number; maxPrice?: number; providerIds?: string[] }): Promise<SMSBowerNumberResult>;
-    getStatus(id: string): Promise<SMSBowerStatusResult>;
-    setStatus(input: { id: string; status: number }): Promise<string>;
-    startRegistrationTask?(input?: unknown): Promise<{ successes: number; orders: number; stopped: boolean }>;
-    stopRegistrationTask?(): Promise<void>;
-  };
+  smsbower: SMSPlatformAPI;
+  smsPlatform: SMSPlatformAPI;
   waDesktop: {
     waConfig: {
       get(): Promise<ClientConfig>;
-      set(input: Partial<Omit<ClientConfig, 'smsbower'>> & { smsbower?: SMSBowerConfigPatch; password?: string; smsbowerApiKey?: string }): Promise<ClientConfig>;
-      testConnection(input?: Partial<Omit<ClientConfig, 'smsbower'>> & { smsbower?: SMSBowerConfigPatch; password?: string; smsbowerApiKey?: string }): Promise<ConnectionTestResult>;
+      set(input: ClientConfigPatch): Promise<ClientConfig>;
+      testConnection(input?: ClientConfigPatch): Promise<ConnectionTestResult>;
     };
     waApi: {
       request<T>(input: { path: string; method?: string; body?: unknown; headers?: Record<string, string>; timeoutMs?: number }): Promise<T>;
@@ -140,16 +149,7 @@ interface Window {
       start(): Promise<ServiceStatus>;
       stop(): Promise<ServiceStatus>;
     };
-    smsbower: {
-      status(): Promise<{ configured: boolean; config: SMSBowerPublicConfig }>;
-      getBalance(): Promise<string>;
-      getCountries(): Promise<unknown>;
-      getPrices(input?: { country?: string }): Promise<SMSBowerPrice[]>;
-      getNumber(input?: { country?: string; minPrice?: number; maxPrice?: number; providerIds?: string[] }): Promise<SMSBowerNumberResult>;
-      getStatus(id: string): Promise<SMSBowerStatusResult>;
-      setStatus(input: { id: string; status: number }): Promise<string>;
-      startRegistrationTask?(input?: unknown): Promise<{ successes: number; orders: number; stopped: boolean }>;
-      stopRegistrationTask?(): Promise<void>;
-    };
+    smsPlatform: SMSPlatformAPI;
+    smsbower: SMSPlatformAPI;
   };
 }

@@ -22,15 +22,21 @@ export type SMSBowerPrice = {
 
 export type SMSBowerClientOptions = {
   apiKey: string;
+  endpoint?: string;
+  label?: string;
   fetcher?: typeof fetch;
 };
 
 export class SMSBowerClient {
   private readonly apiKey: string;
+  private readonly endpoint: string;
+  private readonly label: string;
   private readonly fetcher: typeof fetch;
 
   constructor(options: SMSBowerClientOptions) {
     this.apiKey = options.apiKey;
+    this.endpoint = options.endpoint || smsbowerEndpoint;
+    this.label = options.label || 'SMSBower';
     this.fetcher = options.fetcher || fetch;
   }
 
@@ -75,18 +81,18 @@ export class SMSBowerClient {
     try {
       return JSON.parse(text) as T;
     } catch {
-      throw new Error(`SMSBower returned non-JSON response: ${text}`);
+      throw new Error(`${this.label} returned non-JSON response: ${text}`);
     }
   }
 
   private async requestText(params: Record<string, string>) {
-    const url = new URL(smsbowerEndpoint);
+    const url = new URL(this.endpoint);
     url.searchParams.set('api_key', this.apiKey);
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
     const response = await this.fetcher(url);
     const text = (await response.text()).trim();
-    if (!response.ok) throw new Error(`SMSBower HTTP ${response.status}: ${text}`);
-    if (smsbowerErrorMessage(text)) throw new Error(smsbowerErrorMessage(text));
+    if (!response.ok) throw new Error(`${this.label} HTTP ${response.status}: ${text}`);
+    if (smsbowerErrorMessage(text, this.label)) throw new Error(smsbowerErrorMessage(text, this.label));
     return text;
   }
 }
@@ -165,15 +171,15 @@ function hasPriceShape(value: unknown) {
   return Object.values(record).some((nested) => Boolean(nested && typeof nested === 'object' && ('cost' in (nested as Record<string, unknown>) || 'price' in (nested as Record<string, unknown>))));
 }
 
-function smsbowerErrorMessage(raw: string) {
+function smsbowerErrorMessage(raw: string, label = 'SMSBower') {
   const errors: Record<string, string> = {
-    BAD_KEY: 'SMSBower API key is invalid',
-    NO_BALANCE: 'SMSBower balance is insufficient',
-    NO_NUMBERS: 'SMSBower has no numbers for this request',
-    NO_ACTIVATION: 'SMSBower activation was not found',
-    BAD_SERVICE: 'SMSBower service is invalid',
-    BAD_STATUS: 'SMSBower status is invalid',
-    BAD_ACTION: 'SMSBower action is invalid',
+    BAD_KEY: `${label} API key is invalid`,
+    NO_BALANCE: `${label} balance is insufficient`,
+    NO_NUMBERS: `${label} has no numbers for this request`,
+    NO_ACTIVATION: `${label} activation was not found`,
+    BAD_SERVICE: `${label} service is invalid`,
+    BAD_STATUS: `${label} status is invalid`,
+    BAD_ACTION: `${label} action is invalid`,
   };
   return errors[raw] || '';
 }

@@ -60,22 +60,25 @@ const api = {
     start: () => ipcRenderer.invoke('wa-service:start'),
     stop: () => ipcRenderer.invoke('wa-service:stop'),
   },
-  smsbower: {
-    status: () => ipcRenderer.invoke('smsbower:status'),
-    getBalance: () => ipcRenderer.invoke('smsbower:balance'),
-    getCountries: () => ipcRenderer.invoke('smsbower:countries'),
-    getPrices: (input?: unknown) => ipcRenderer.invoke('smsbower:prices', input),
-    getNumber: (input?: unknown) => ipcRenderer.invoke('smsbower:number', input),
-    getStatus: (id: string) => ipcRenderer.invoke('smsbower:get-status', id),
-    setStatus: (input: unknown) => ipcRenderer.invoke('smsbower:set-status', input),
+  smsPlatform: {
+    status: () => ipcRenderer.invoke('sms-platform:status'),
+    getBalance: () => ipcRenderer.invoke('sms-platform:balance'),
+    getCountries: () => ipcRenderer.invoke('sms-platform:countries'),
+    getPrices: (input?: unknown) => ipcRenderer.invoke('sms-platform:prices', input),
+    getNumber: (input?: unknown) => ipcRenderer.invoke('sms-platform:number', input),
+    getStatus: (id: string) => ipcRenderer.invoke('sms-platform:get-status', id),
+    setStatus: (input: unknown) => ipcRenderer.invoke('sms-platform:set-status', input),
     startRegistrationTask,
     stopRegistrationTask,
   },
 };
+
+const legacySMSBower = api.smsPlatform;
 
 contextBridge.exposeInMainWorld('waDesktop', api);
 contextBridge.exposeInMainWorld('waConfig', api.waConfig);
 contextBridge.exposeInMainWorld('waApi', api.waApi);
 contextBridge.exposeInMainWorld('openAIPhone', api.openAIPhone);
 contextBridge.exposeInMainWorld('waService', api.waService);
-contextBridge.exposeInMainWorld('smsbower', api.smsbower);
+contextBridge.exposeInMainWorld('smsPlatform', api.smsPlatform);
+contextBridge.exposeInMainWorld('smsbower', legacySMSBower);

@@ -580,6 +580,11 @@ async function main() {
     if (rateLimitRegisters.length) throw new Error(`OpenAI rate limit scenario still called register: ${JSON.stringify(rateLimitRegisters)}`);
     checks.platformStopsOnOpenAIRateLimit = true;
     await route(client, '#/settings', 'Boolean(document.querySelector(".app-shell[data-view=settings] .settings-page"))');
+    checks.smsProviderSelector = await runInPage(client, `
+      const text = document.body.innerText;
+      if (!text.includes('SMSBower') || !text.includes('Hero-SMS')) throw new Error('SMS provider selector options are not visible');
+      return true;
+    `);
     await evaluate(client, 'window.smsbower.stopRegistrationTask()');
     await new Promise((resolve) => setTimeout(resolve, 500));
     await route(client, '#/add', 'Boolean(document.querySelector(".app-shell[data-view=add]") && document.querySelector(".add-page"))');
@@ -623,7 +628,9 @@ try {
     mode = "remote"
     remoteBaseUrl = $serverInfo.baseUrl
     password = "mock-password"
+    smsProvider = "smsbower"
     smsbowerApiKey = "mock-smsbower-key"
+    heroSMSApiKey = "mock-hero-sms-key"
     smsbower = @{
       enabled = $true
       country = "187"

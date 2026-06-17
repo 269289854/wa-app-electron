@@ -4,6 +4,7 @@ import {
   defaultConfig,
   getPassword,
   getSMSBowerApiKey,
+  getHeroSMSApiKey,
   normalizeBaseUrl,
   normalizeConfig,
   normalizeWindowState,
@@ -11,6 +12,7 @@ import {
   publicConfig,
   setPassword,
   setSMSBowerApiKey,
+  setHeroSMSApiKey,
   type PasswordCodec,
 } from './config.js';
 
@@ -31,6 +33,7 @@ describe('electron config helpers', () => {
     const config = defaultConfig('C:/Users/test/AppData/Roaming/wa-app-electron');
     expect(config.mode).toBe('remote');
     expect(config.remoteBaseUrl).toBe('https://wa.yizhimeng.uk');
+    expect(config.smsProvider).toBe('smsbower');
     expect(config.localDataDir).toContain('wa-app-data');
     expect(config.smsbower).toMatchObject({ enabled: false, targetSuccessCount: 1, maxOrders: 3, numberIntervalSeconds: 0, openAIPhoneCheckEnabled: false });
     expect(config.windowState).toEqual({ width: 1320, height: 860 });
@@ -124,6 +127,29 @@ describe('electron config helpers', () => {
     const cleared = setSMSBowerApiKey(stored, '', encryptedCodec);
     expect(cleared.smsbower.encryptedApiKey).toBeUndefined();
     expect(publicConfig(cleared).smsbower.hasApiKey).toBe(false);
+  });
+
+  it('stores Hero-SMS API key separately and marks Hero-SMS configured', () => {
+    const stored = setHeroSMSApiKey({
+      ...defaultConfig('C:/data'),
+      smsProvider: 'hero-sms',
+      smsbower: {
+        ...defaultConfig('C:/data').smsbower,
+        enabled: true,
+        country: '187',
+        maxPrice: 0.5,
+      },
+    }, ' hero-key ', encryptedCodec);
+    const config = publicConfig(stored);
+    expect(config.smsProvider).toBe('hero-sms');
+    expect(config.smsbower).toMatchObject({ provider: 'hero-sms', providerLabel: 'Hero-SMS', hasHeroSMSApiKey: true, configured: true });
+    expect(config.smsbower.hasApiKey).toBe(false);
+    expect(JSON.stringify(config)).not.toContain('hero-key');
+    expect(getHeroSMSApiKey(stored, encryptedCodec)).toBe('hero-key');
+
+    const cleared = setHeroSMSApiKey(stored, '', encryptedCodec);
+    expect(cleared.smsbower.encryptedHeroSMSApiKey).toBeUndefined();
+    expect(publicConfig(cleared).smsbower.hasHeroSMSApiKey).toBe(false);
   });
 
   it('requires SMSBower key, country, and max price before marking it configured', () => {

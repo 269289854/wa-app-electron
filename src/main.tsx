@@ -791,9 +791,9 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
   const queryClient = useQueryClient();
   const configQuery = useQuery({ queryKey: ['config'], queryFn: () => window.waConfig.get() });
   const smsbowerCountriesQuery = useQuery({
-    queryKey: ['smsbower-countries'],
-    queryFn: async () => normalizeSMSBowerCountries(await window.smsbower.getCountries()),
-    enabled: Boolean(configQuery.data?.smsbower.hasApiKey),
+    queryKey: ['sms-platform-countries', configQuery.data?.smsProvider],
+    queryFn: async () => normalizeSMSBowerCountries(await window.smsPlatform.getCountries()),
+    enabled: Boolean(configQuery.data?.smsbower.configured),
     staleTime: 60 * 60 * 1000,
   });
   const [countryCallingCode, setCountryCallingCode] = useState('');
@@ -827,8 +827,10 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
     setPhone(normalized.phone);
   };
   const startSMSBowerRegistrationTask = async (): Promise<SMSBowerRegistrationTaskResult> => {
-    const config = (await window.waConfig.get()).smsbower;
-    if (!config.configured) throw new Error('SMSBower is not configured');
+    const appConfig = await window.waConfig.get();
+    const config = appConfig.smsbower;
+    const platformName = config.providerLabel || '接码平台';
+    if (!config.configured) throw new Error(`${platformName} is not configured`);
     stopPlatformRef.current = false;
     setDebugExchanges([]);
     setPlatformState({
@@ -839,9 +841,10 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
       orders: 0,
       currentPhone: '',
       activationId: '',
-      message: 'Checking SMSBower price',
+      message: `Checking ${platformName} price`,
     });
-    appendDebugExchange(setDebugExchanges, debugInfo('SMSBower start', {
+    appendDebugExchange(setDebugExchanges, debugInfo(`${platformName} start`, {
+      provider: config.provider,
       country: config.country,
       minPrice: config.minPrice,
       maxPrice: config.maxPrice,
@@ -849,10 +852,11 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
       maxOrders: config.maxOrders,
       numberIntervalSeconds: config.numberIntervalSeconds,
     }));
-    const prices = await window.smsbower.getPrices({ country: config.country });
+    const prices = await window.smsPlatform.getPrices({ country: config.country });
     const inRangePrices = filterSMSBowerPrices(prices, config);
     const providerIds = inRangePrices.map((item) => item.providerId).filter((id): id is string => Boolean(id));
-    appendDebugExchange(setDebugExchanges, debugInfo('SMSBower prices', {
+    appendDebugExchange(setDebugExchanges, debugInfo(`${platformName} prices`, {
+      provider: config.provider,
       country: config.country,
       service: 'wa',
       minPrice: config.minPrice,
@@ -862,7 +866,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
     }));
     const price = selectSMSBowerPrice(prices, config);
     if (!price) throw new Error(smsbowerPriceErrorMessage(prices, config));
-    appendDebugExchange(setDebugExchanges, debugInfo('SMSBower price ok', {
+    appendDebugExchange(setDebugExchanges, debugInfo(`${platformName} price ok`, {
       selectedProviders: providerIds,
       minCost: price.cost,
       totalCount: inRangePrices.reduce((total, item) => total + item.count, 0),
@@ -875,7 +879,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
       const nextOrder = orders + 1;
       if (orders > 0 && config.numberIntervalSeconds > 0) {
         setPlatformState((state) => ({ ...state, stage: 'number', message: `Waiting ${config.numberIntervalSeconds}s before next number` }));
-        appendDebugExchange(setDebugExchanges, debugInfo('SMSBower number interval', {
+        appendDebugExchange(setDebugExchanges, debugInfo(`${platformName} number interval`, {
           seconds: config.numberIntervalSeconds,
           nextOrder,
         }));
@@ -885,15 +889,15 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
       orders += 1;
       setPlatformState((state) => ({ ...state, stage: 'number', orders, message: `Buying number ${orders}/${config.maxOrders}` }));
       const numberRequest = { country: config.country, service: 'wa', minPrice: config.minPrice, maxPrice: config.maxPrice, providerIds };
-      const numberExchange = debugRequest('SMSBower getNumber', 'smsbower:getNumber', numberRequest);
+      const numberExchange = debugRequest(`${platformName} getNumber`, 'sms-platform:getNumber', numberRequest);
       appendDebugExchange(setDebugExchanges, numberExchange);
       let number: SMSBowerNumberResult;
       try {
-        number = await window.smsbower.getNumber({ country: config.country, minPrice: config.minPrice, maxPrice: config.maxPrice, providerIds });
+        number = await window.smsPlatform.getNumber({ country: config.country, minPrice: config.minPrice, maxPrice: config.maxPrice, providerIds });
         patchDebugExchange(setDebugExchanges, numberExchange, { ...numberExchange, response: sanitizeDebugValue(number) });
       } catch (error) {
         patchDebugExchange(setDebugExchanges, numberExchange, { ...numberExchange, error: debugError(error) });
-        appendDebugExchange(setDebugExchanges, debugInfo('SMSBower task stopped', { order: orders, error: errorMessage(error) }));
+        appendDebugExchange(setDebugExchanges, debugInfo(`${platformName} task stopped`, { order: orders, error: errorMessage(error) }));
         throw error;
       }
 
@@ -905,8 +909,8 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
         const normalized = normalizePhoneInput(number.phone, '');
         setPlatformState((state) => ({ ...state, stage: 'probe', currentPhone: number.phone, activationId: number.activationId, message: 'Probing WA registration route' }));
         if (!normalized) {
-          cancelReason = 'SMSBower returned an invalid phone number';
-          appendDebugExchange(setDebugExchanges, debugInfo('SMSBower invalid number', number));
+          cancelReason = `${platformName} returned an invalid phone number`;
+          appendDebugExchange(setDebugExchanges, debugInfo(`${platformName} invalid number`, number));
           continue;
         }
         setCountryCallingCode(normalized.country_calling_code);
@@ -921,7 +925,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
         );
         if (!registration.ok) {
           cancelReason = registration.reason || 'WA registration was skipped';
-          appendDebugExchange(setDebugExchanges, debugInfo('SMSBower WA registration skipped', {
+          appendDebugExchange(setDebugExchanges, debugInfo(`${platformName} WA registration skipped`, {
             activationId: number.activationId,
             reason: cancelReason,
           }));
@@ -936,13 +940,13 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
         const verificationRequestId = registration.response.verification_request_id || '';
         if (!waAccountId) {
           cancelReason = 'WA registration response did not include wa_account_id';
-          appendDebugExchange(setDebugExchanges, debugInfo('SMSBower missing wa_account_id', registration.response));
+          appendDebugExchange(setDebugExchanges, debugInfo(`${platformName} missing wa_account_id`, registration.response));
           continue;
         }
         setPendingAccountID(waAccountId);
         setPendingVerificationRequestID(verificationRequestId);
-        setPlatformState((state) => ({ ...state, stage: 'otp', message: 'Waiting for SMSBower OTP code' }));
-        const codeResult = await waitForSMSBowerCode(number.activationId, config, setDebugExchanges, stopPlatformRef);
+        setPlatformState((state) => ({ ...state, stage: 'otp', message: `Waiting for ${platformName} OTP code` }));
+        const codeResult = await waitForSMSBowerCode(number.activationId, config, platformName, setDebugExchanges, stopPlatformRef);
         if (!codeResult.code) {
           cancelReason = codeResult.reason;
           continue;
@@ -958,7 +962,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
             otp: codeResult.code,
             setDebugExchanges,
             stopRef: stopPlatformRef,
-            label: 'Submit SMSBower OTP',
+            label: `Submit ${platformName} OTP`,
             onRetry: (attempt) => setPlatformState((state) => ({
               ...state,
               stage: 'submit',
@@ -969,14 +973,14 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
           if (!exists) throw new Error(otpResponse.error_message || 'OTP submitted but account was not found in the account list');
           completed = true;
           setOtp('');
-          const doneExchange = debugRequest('SMSBower setStatus complete', 'smsbower:setStatus', { id: number.activationId, status: 6 });
+          const doneExchange = debugRequest(`${platformName} setStatus complete`, 'sms-platform:setStatus', { id: number.activationId, status: 6 });
           appendDebugExchange(setDebugExchanges, doneExchange);
           try {
-            const done = await window.smsbower.setStatus({ id: number.activationId, status: 6 });
+            const done = await window.smsPlatform.setStatus({ id: number.activationId, status: 6 });
             patchDebugExchange(setDebugExchanges, doneExchange, { ...doneExchange, response: sanitizeDebugValue(done) });
           } catch (error) {
             patchDebugExchange(setDebugExchanges, doneExchange, { ...doneExchange, error: debugError(error) });
-            appendDebugExchange(setDebugExchanges, debugInfo('SMSBower setStatus complete failed', { activationId: number.activationId, error: errorMessage(error) }));
+            appendDebugExchange(setDebugExchanges, debugInfo(`${platformName} setStatus complete failed`, { activationId: number.activationId, error: errorMessage(error) }));
           }
           successes += 1;
           setPlatformState((state) => ({ ...state, successes, stage: 'number', message: `Success ${successes}/${config.targetSuccessCount}` }));
@@ -991,28 +995,28 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
               stage: 'submit',
               message: 'OTP received, but WA submit failed temporarily. You can retry manually.',
             }));
-            appendDebugExchange(setDebugExchanges, debugInfo('SMSBower OTP submit transient failed', {
+            appendDebugExchange(setDebugExchanges, debugInfo(`${platformName} OTP submit transient failed`, {
               activationId: number.activationId,
               wa_account_id: waAccountId,
               verification_request_id: verificationRequestId,
               error: cancelReason,
             }));
           } else {
-            appendDebugExchange(setDebugExchanges, debugInfo('SMSBower OTP submit failed', { activationId: number.activationId, error: cancelReason }));
+            appendDebugExchange(setDebugExchanges, debugInfo(`${platformName} OTP submit failed`, { activationId: number.activationId, error: cancelReason }));
           }
         }
       } catch (error) {
         cancelReason = errorMessage(error);
-        appendDebugExchange(setDebugExchanges, debugInfo('SMSBower order failed', { activationId: number.activationId, error: cancelReason }));
+        appendDebugExchange(setDebugExchanges, debugInfo(`${platformName} order failed`, { activationId: number.activationId, error: cancelReason }));
       } finally {
         if (!completed && cancelReason && otpReceived && skipCancel) {
-          appendDebugExchange(setDebugExchanges, debugInfo('SMSBower cancel skipped after OTP received', {
+          appendDebugExchange(setDebugExchanges, debugInfo(`${platformName} cancel skipped after OTP received`, {
             activationId: number.activationId,
             reason: cancelReason,
           }));
         } else if (!completed && cancelReason) {
-          setPlatformState((state) => ({ ...state, message: `Cancelling SMSBower order ${number.activationId}` }));
-          await cancelSMSBowerOrder(number.activationId, cancelReason, setDebugExchanges);
+          setPlatformState((state) => ({ ...state, message: `Cancelling ${platformName} order ${number.activationId}` }));
+          await cancelSMSBowerOrder(number.activationId, cancelReason, platformName, setDebugExchanges);
         }
       }
       if (stopPlatformRef.current) break;
@@ -1124,8 +1128,10 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
     },
     onError: (error) => notify('error', errorMessage(error)),
   });
-  const platformConfigured = Boolean(configQuery.data?.smsbower.configured);
-  const platformCountryLabel = countryDisplayName(smsbowerCountriesQuery.data || [], configQuery.data?.smsbower.country || '');
+  const smsConfig = configQuery.data?.smsbower;
+  const platformName = smsConfig?.providerLabel || '接码平台';
+  const platformConfigured = Boolean(smsConfig?.configured);
+  const platformCountryLabel = countryDisplayName(smsbowerCountriesQuery.data || [], smsConfig?.country || '');
   const platformBusy = platformRegisterMutation.isPending;
   const addAccountBusy = probeAndRegisterMutation.isPending || otpMutation.isPending || platformBusy;
   useEffect(() => {
@@ -1212,17 +1218,17 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
         </InfoCard>
       </div>
       {platformConfigured ? (
-        <InfoCard title="SMSBower 平台注册" icon={<MessageCircle size={17} />}>
+        <InfoCard title={`${platformName} 平台注册`} icon={<MessageCircle size={17} />}>
           <div className="platform-register">
             <div className="platform-stats">
               <span>国家 {platformCountryLabel || '-'}</span>
-              <span>价格 {configQuery.data?.smsbower.minPrice}-{configQuery.data?.smsbower.maxPrice}</span>
-              <span>成功 {platformState.successes}/{configQuery.data?.smsbower.targetSuccessCount || 0}</span>
-              <span>下单 {platformState.orders}/{configQuery.data?.smsbower.maxOrders || 0}</span>
+              <span>价格 {smsConfig?.minPrice}-{smsConfig?.maxPrice}</span>
+              <span>成功 {platformState.successes}/{smsConfig?.targetSuccessCount || 0}</span>
+              <span>下单 {platformState.orders}/{smsConfig?.maxOrders || 0}</span>
             </div>
             <div className={`result-banner ${platformBusy ? 'warn' : platformState.successes ? 'ok' : ''}`}>
               <strong>{platformStageLabel(platformState.stage)}</strong>
-              <span>{platformState.message || '使用 SMSBower 购买 WhatsApp 号码，自动探测、注册、等待验证码并提交 OTP。'}</span>
+              <span>{platformState.message || `使用 ${platformName} 购买 WhatsApp 号码，自动探测、注册、等待验证码并提交 OTP。`}</span>
               {platformState.currentPhone ? <span>{platformState.currentPhone} / {platformState.activationId}</span> : null}
             </div>
             <div className="inline-actions">
@@ -1298,7 +1304,9 @@ type SettingsForm = {
   localDataDir: string;
   autoStartLocalService: boolean;
   password: string;
+  smsProvider: SMSProvider;
   smsbowerApiKey: string;
+  heroSMSApiKey: string;
   smsbower: Pick<
     SMSBowerPublicConfig,
     'enabled' | 'country' | 'minPrice' | 'maxPrice' | 'targetSuccessCount' | 'maxOrders' | 'numberIntervalSeconds' | 'openAIPhoneCheckEnabled' | 'pollIntervalSeconds' | 'otpTimeoutSeconds'
@@ -1421,7 +1429,7 @@ async function checkOpenAIPhoneForSMSBower(
   enabled: boolean,
 ) {
   if (!enabled) {
-    return normalizeOpenAIPhoneCheckResult({ status: 'available', message: 'OpenAI phone check disabled' });
+    return { status: 'available' as const, message: 'OpenAI phone check disabled' };
   }
   const requestId = `openai-phone-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const body = {
@@ -1471,18 +1479,19 @@ function smsbowerPriceErrorMessage(prices: SMSBowerPrice[], config: SMSBowerPubl
 async function cancelSMSBowerOrder(
   activationId: string,
   reason: string,
+  platformName: string,
   setDebugExchanges: React.Dispatch<React.SetStateAction<DebugExchange[]>>,
 ) {
   return cancelSMSBowerActivation(
     activationId,
     reason,
-    (input) => window.smsbower.setStatus(input),
-    (entry) => appendDebugExchange(setDebugExchanges, smsbowerCancelExchange(entry)),
+    (input) => window.smsPlatform.setStatus(input),
+    (entry) => appendDebugExchange(setDebugExchanges, smsbowerCancelExchange(entry, platformName)),
   );
 }
 
-function smsbowerCancelExchange(entry: SMSBowerCancelLogEntry): DebugExchange {
-  const exchange = debugRequest('SMSBower setStatus cancel', 'smsbower:setStatus', {
+function smsbowerCancelExchange(entry: SMSBowerCancelLogEntry, platformName = 'SMSBower'): DebugExchange {
+  const exchange = debugRequest(`${platformName} setStatus cancel`, 'sms-platform:setStatus', {
     id: entry.id,
     status: entry.status,
     reason: entry.reason,
@@ -1545,6 +1554,7 @@ async function submitRegistrationOTPWithRetry(input: SubmitRegistrationOTPWithRe
 async function waitForSMSBowerCode(
   activationId: string,
   config: SMSBowerPublicConfig,
+  platformName: string,
   setDebugExchanges: React.Dispatch<React.SetStateAction<DebugExchange[]>>,
   stopRef: React.MutableRefObject<boolean>,
 ) {
@@ -1552,23 +1562,23 @@ async function waitForSMSBowerCode(
   const timeoutMs = config.otpTimeoutSeconds * 1000;
   const intervalMs = config.pollIntervalSeconds * 1000;
   while (Date.now() - started < timeoutMs) {
-    if (stopRef.current) return { code: '', reason: 'SMSBower task was stopped by user' };
+    if (stopRef.current) return { code: '', reason: `${platformName} task was stopped by user` };
     await delay(intervalMs);
-    if (stopRef.current) return { code: '', reason: 'SMSBower task was stopped by user' };
-    const statusExchange = debugRequest('SMSBower getStatus', 'smsbower:getStatus', { id: activationId });
+    if (stopRef.current) return { code: '', reason: `${platformName} task was stopped by user` };
+    const statusExchange = debugRequest(`${platformName} getStatus`, 'sms-platform:getStatus', { id: activationId });
     appendDebugExchange(setDebugExchanges, statusExchange);
     try {
-      const status = await window.smsbower.getStatus(activationId);
+      const status = await window.smsPlatform.getStatus(activationId);
       patchDebugExchange(setDebugExchanges, statusExchange, { ...statusExchange, response: sanitizeDebugValue(status) });
       if (status.status === 'ok' && status.code) return { code: status.code, reason: '' };
-      if (status.status === 'cancelled') return { code: '', reason: 'SMSBower activation was already cancelled' };
-      if (status.status === 'error') return { code: '', reason: status.error || status.raw || 'SMSBower status returned an error' };
+      if (status.status === 'cancelled') return { code: '', reason: `${platformName} activation was already cancelled` };
+      if (status.status === 'error') return { code: '', reason: status.error || status.raw || `${platformName} status returned an error` };
     } catch (error) {
       patchDebugExchange(setDebugExchanges, statusExchange, { ...statusExchange, error: debugError(error) });
       return { code: '', reason: errorMessage(error) };
     }
   }
-  return { code: '', reason: 'SMSBower OTP timed out' };
+  return { code: '', reason: `${platformName} OTP timed out` };
 }
 
 async function confirmAccountAppears(accountId: string) {
@@ -1629,6 +1639,7 @@ function SMSBowerSettingsFields({
   form,
   setForm,
   hasApiKey,
+  hasHeroSMSApiKey,
   countries,
   countriesLoading,
   countriesError,
@@ -1637,12 +1648,15 @@ function SMSBowerSettingsFields({
   form: SettingsForm;
   setForm: React.Dispatch<React.SetStateAction<SettingsForm>>;
   hasApiKey?: boolean;
+  hasHeroSMSApiKey?: boolean;
   countries: SMSBowerCountry[];
   countriesLoading: boolean;
   countriesError?: string;
   onReloadCountries: () => void;
 }) {
   const [countryQuery, setCountryQuery] = useState('');
+  const activeHasApiKey = form.smsProvider === 'hero-sms' ? hasHeroSMSApiKey : hasApiKey;
+  const platformName = form.smsProvider === 'hero-sms' ? 'Hero-SMS' : 'SMSBower';
   const filteredCountries = filterSMSBowerCountries(countries, countryQuery).slice(0, 80);
   const selectedCountryLabel = countryDisplayName(countries, form.smsbower.country);
   const updateSMSBower = (patch: Partial<SettingsForm['smsbower']>) => setForm((current) => ({
@@ -1653,34 +1667,53 @@ function SMSBowerSettingsFields({
     <div className="settings-subsection">
       <label className="check-row">
         <input checked={form.smsbower.enabled} onChange={(event) => updateSMSBower({ enabled: event.target.checked })} type="checkbox" />
-        启用 SMSBower 平台注册
+        启用接码平台注册
+      </label>
+      <label>
+        接码平台
+        <select value={form.smsProvider} onChange={(event) => setForm((current) => ({ ...current, smsProvider: event.target.value as SMSProvider }))}>
+          <option value="smsbower">SMSBower</option>
+          <option value="hero-sms">Hero-SMS</option>
+        </select>
       </label>
       <label className="check-row">
         <input checked={form.smsbower.openAIPhoneCheckEnabled} onChange={(event) => updateSMSBower({ openAIPhoneCheckEnabled: event.target.checked })} type="checkbox" />
         注册前检查 OpenAI 手机号占用
       </label>
-      <label>
-        SMSBower API Key
-        <input
-          value={form.smsbowerApiKey}
-          onChange={(event) => setForm((current) => ({ ...current, smsbowerApiKey: event.target.value }))}
-          type="password"
-          placeholder={hasApiKey ? '已保存，留空不修改' : '请输入 SMSBower API Key'}
-        />
-      </label>
+      {form.smsProvider === 'smsbower' ? (
+        <label>
+          SMSBower API Key
+          <input
+            value={form.smsbowerApiKey}
+            onChange={(event) => setForm((current) => ({ ...current, smsbowerApiKey: event.target.value }))}
+            type="password"
+            placeholder={hasApiKey ? '已保存，留空不修改' : '请输入 SMSBower API Key'}
+          />
+        </label>
+      ) : (
+        <label>
+          Hero-SMS API Key
+          <input
+            value={form.heroSMSApiKey}
+            onChange={(event) => setForm((current) => ({ ...current, heroSMSApiKey: event.target.value }))}
+            type="password"
+            placeholder={hasHeroSMSApiKey ? '已保存，留空不修改' : '请输入 Hero-SMS API Key'}
+          />
+        </label>
+      )}
       <div className="form-grid two">
         <div className="form-field">
           国家
           <input
             value={countryQuery}
             onChange={(event) => setCountryQuery(event.target.value)}
-            placeholder={hasApiKey ? '搜索国家名称或 ID' : '先保存 SMSBower API Key'}
-            disabled={!hasApiKey}
+            placeholder={activeHasApiKey ? '搜索国家名称或 ID' : `先保存 ${platformName} API Key`}
+            disabled={!activeHasApiKey}
           />
-          <span className="field-hint">{selectedCountryLabel ? `已选择：${selectedCountryLabel}` : '请选择 SMSBower 国家列表里的国家 ID。'}</span>
+          <span className="field-hint">{selectedCountryLabel ? `已选择：${selectedCountryLabel}` : `请选择 ${platformName} 国家列表里的国家 ID。`}</span>
           {countriesLoading ? <span className="field-hint">正在加载国家列表...</span> : null}
           {countriesError ? <span className="field-hint">{countriesError}</span> : null}
-          {hasApiKey ? (
+          {activeHasApiKey ? (
             <div className="country-picker">
               <div className="inline-actions">
                 <button className="secondary-button" type="button" onClick={onReloadCountries}>刷新国家</button>
@@ -1747,19 +1780,15 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
   const queryClient = useQueryClient();
   const configQuery = useQuery({ queryKey: ['config'], queryFn: () => window.waConfig.get() });
   const serviceQuery = useQuery({ queryKey: ['service'], queryFn: () => window.waService.status(), refetchInterval: 10000 });
-  const smsbowerCountriesQuery = useQuery({
-    queryKey: ['smsbower-countries'],
-    queryFn: async () => normalizeSMSBowerCountries(await window.smsbower.getCountries()),
-    enabled: Boolean(configQuery.data?.smsbower.hasApiKey),
-    staleTime: 60 * 60 * 1000,
-  });
   const [form, setForm] = useState<SettingsForm>({
     mode: 'remote' as ClientMode,
     remoteBaseUrl: '',
     localDataDir: '',
     autoStartLocalService: false,
     password: '',
+    smsProvider: 'smsbower',
     smsbowerApiKey: '',
+    heroSMSApiKey: '',
     smsbower: {
       enabled: false,
       country: '',
@@ -1773,6 +1802,12 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
       otpTimeoutSeconds: 600,
     },
   });
+  const smsbowerCountriesQuery = useQuery({
+    queryKey: ['sms-platform-countries', form.smsProvider],
+    queryFn: async () => normalizeSMSBowerCountries(await window.smsPlatform.getCountries()),
+    enabled: Boolean(form.smsProvider === 'hero-sms' ? configQuery.data?.smsbower.hasHeroSMSApiKey : configQuery.data?.smsbower.hasApiKey),
+    staleTime: 60 * 60 * 1000,
+  });
   useEffect(() => {
     if (!configQuery.data) return;
     setForm((current) => ({
@@ -1781,6 +1816,7 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
       remoteBaseUrl: configQuery.data.remoteBaseUrl,
       localDataDir: configQuery.data.localDataDir,
       autoStartLocalService: configQuery.data.autoStartLocalService,
+      smsProvider: configQuery.data.smsProvider,
       smsbower: {
         enabled: configQuery.data.smsbower.enabled,
         country: configQuery.data.smsbower.country,
@@ -1796,7 +1832,12 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
     }));
   }, [configQuery.data]);
   const saveMutation = useMutation({
-    mutationFn: () => window.waConfig.set({ ...form, password: form.password || undefined, smsbowerApiKey: form.smsbowerApiKey || undefined }),
+    mutationFn: () => window.waConfig.set({
+      ...form,
+      password: form.password || undefined,
+      smsbowerApiKey: form.smsbowerApiKey || undefined,
+      heroSMSApiKey: form.heroSMSApiKey || undefined,
+    }),
     onSuccess: async () => {
       notify('success', '连接配置已保存');
       await queryClient.invalidateQueries({ queryKey: ['config'] });
@@ -1804,7 +1845,12 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
     onError: (error) => notify('error', errorMessage(error)),
   });
   const testMutation = useMutation({
-    mutationFn: () => window.waConfig.testConnection({ ...form, password: form.password || undefined }),
+    mutationFn: () => window.waConfig.testConnection({
+      ...form,
+      password: form.password || undefined,
+      smsbowerApiKey: form.smsbowerApiKey || undefined,
+      heroSMSApiKey: form.heroSMSApiKey || undefined,
+    }),
     onSuccess: async (result) => {
       notify(result.ok ? 'success' : 'error', result.ok ? '连接测试成功' : result.error || '连接测试失败');
       await queryClient.invalidateQueries({ queryKey: ['config'] });
@@ -1862,6 +1908,7 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
               form={form}
               setForm={setForm}
               hasApiKey={configQuery.data?.smsbower.hasApiKey}
+              hasHeroSMSApiKey={configQuery.data?.smsbower.hasHeroSMSApiKey}
               countries={smsbowerCountriesQuery.data || []}
               countriesLoading={smsbowerCountriesQuery.isFetching}
               countriesError={smsbowerCountriesQuery.error ? errorMessage(smsbowerCountriesQuery.error) : ''}
