@@ -24,6 +24,7 @@ export type SMSBowerClientOptions = {
   apiKey: string;
   endpoint?: string;
   label?: string;
+  pricesAction?: string;
   fetcher?: typeof fetch;
 };
 
@@ -31,12 +32,14 @@ export class SMSBowerClient {
   private readonly apiKey: string;
   private readonly endpoint: string;
   private readonly label: string;
+  private readonly pricesAction: string;
   private readonly fetcher: typeof fetch;
 
   constructor(options: SMSBowerClientOptions) {
     this.apiKey = options.apiKey;
     this.endpoint = options.endpoint || smsbowerEndpoint;
     this.label = options.label || 'SMSBower';
+    this.pricesAction = options.pricesAction || 'getPricesV3';
     this.fetcher = options.fetcher || fetch;
   }
 
@@ -49,7 +52,7 @@ export class SMSBowerClient {
   }
 
   async getPrices(country: string, service = smsbowerWhatsAppService) {
-    const data = await this.requestJSON<unknown>({ action: 'getPricesV3', country, service });
+    const data = await this.requestJSON<unknown>({ action: this.pricesAction, country, service });
     return normalizePrices(data, country, service);
   }
 

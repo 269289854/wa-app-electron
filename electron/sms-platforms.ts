@@ -19,6 +19,7 @@ export const smsProviderLabels: Record<SMSProvider, string> = {
 };
 
 export const heroSMSEndpoint = 'https://hero-sms.com/stubs/handler_api.php';
+const heroSMSPricesAction = 'getPrices';
 
 export function normalizeSMSProvider(value: unknown): SMSProvider {
   return value === 'hero-sms' ? 'hero-sms' : 'smsbower';
@@ -26,10 +27,12 @@ export function normalizeSMSProvider(value: unknown): SMSProvider {
 
 export function createSMSPlatformClient(input: { provider: SMSProvider; apiKey: string; fetcher?: typeof fetch }): SMSPlatformClient {
   const endpoint = input.provider === 'hero-sms' ? heroSMSEndpoint : smsbowerEndpoint;
+  const pricesAction = input.provider === 'hero-sms' ? heroSMSPricesAction : undefined;
   const client = new SMSBowerClient({
     apiKey: input.apiKey,
     endpoint,
     label: smsProviderLabels[input.provider],
+    pricesAction,
     fetcher: input.fetcher,
   });
   return {

@@ -8,7 +8,7 @@ describe('SMS platform adapters', () => {
     expect(smsProviderLabels['hero-sms']).toBe('Hero-SMS');
   });
 
-  it('uses the Hero-SMS endpoint with SMS-Activate compatible parameters', async () => {
+  it('uses the Hero-SMS endpoint with its SMS-Activate compatible number parameters', async () => {
     let requestedUrl = '';
     const client = createSMSPlatformClient({
       provider: 'hero-sms',
@@ -31,6 +31,29 @@ describe('SMS platform adapters', () => {
     expect(url.searchParams.get('service')).toBe('wa');
     expect(url.searchParams.get('country')).toBe('187');
     expect(url.searchParams.get('maxPrice')).toBe('0.5');
+  });
+
+  it('uses getPrices for Hero-SMS prices because getPricesV3 returns BAD_ACTION', async () => {
+    let requestedUrl = '';
+    const client = createSMSPlatformClient({
+      provider: 'hero-sms',
+      apiKey: 'hero-secret',
+      fetcher: (async (url) => {
+        requestedUrl = String(url);
+        return new Response(JSON.stringify({ 187: { wa: { cost: 2.5, count: 554358, physicalCount: 169 } } }));
+      }) as typeof fetch,
+    });
+
+    await expect(client.getPrices('187', 'wa')).resolves.toEqual([
+      { country: '187', service: 'wa', cost: 2.5, count: 554358 },
+    ]);
+
+    const url = new URL(requestedUrl);
+    expect(`${url.origin}${url.pathname}`).toBe(heroSMSEndpoint);
+    expect(url.searchParams.get('api_key')).toBe('hero-secret');
+    expect(url.searchParams.get('action')).toBe('getPrices');
+    expect(url.searchParams.get('service')).toBe('wa');
+    expect(url.searchParams.get('country')).toBe('187');
   });
 
   it('normalizes Hero-SMS status and cancel responses', async () => {
