@@ -57,7 +57,7 @@ Remove-Item Env:\WA_APP_ELECTRON_SMOKE_PASSWORD -ErrorAction SilentlyContinue
 
 ### 凭据存储
 
-[electron/config.ts](electron/config.ts)：配置文件 `userData/config.json`，密码、SMSBower/Hero-SMS API key 用 Electron `safeStorage` 加密后存为 `encryptedPassword`/`encryptedApiKey`/`encryptedHeroSMSApiKey`。`publicConfig` 只返回 `hasPassword`/`hasApiKey` 等布尔位，绝不回传明文。生产白屏/明文回归是 smoke 重点防范项。
+[electron/config.ts](electron/config.ts) 定义配置类型与纯函数（`normalizeConfig`/`publicConfig`/密码与 API key 的 codec）；存储后端在 [electron/config-store.ts](electron/config-store.ts)：SQLite 库 `userData/config.sqlite`，表 `app_config(field, value, updated_at_ms)` 逐字段分行，`smsbower`/`windowState` 存 JSON 文本。密码、SMSBower/Hero-SMS API key 用 Electron `safeStorage` 加密后存为 `encryptedPassword`/`encryptedApiKey`/`encryptedHeroSMSApiKey`（base64 文本）。`readConfig`/`writeConfig` 在 [main.ts](electron/main.ts) 走 `node:sqlite` 同步 `DatabaseSync`，保持同步签名。主进程启动时 `migrateConfigFromJson` 若发现旧 `userData/config.json` 且 SQLite 为空，会自动导入并归档为 `config.json.bak`。`publicConfig` 只返回 `hasPassword`/`hasApiKey` 等布尔位，绝不回传明文。生产白屏/明文回归是 smoke 重点防范项。
 
 ### SMS 平台与取消队列
 

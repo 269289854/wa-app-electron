@@ -143,9 +143,12 @@ Get-Process | Where-Object { $_.Path -like "*wa-app-electron*WA App.exe*" } | St
 if (!$firstRunStarted) {
   throw "Electron first-run process exited too early"
 }
-$firstRunConfigPath = Join-Path $firstRunUserData "config.json"
-if ((Test-Path $firstRunConfigPath) -and (Get-Content $firstRunConfigPath -Raw).Contains("encryptedPassword")) {
-  throw "First-run config unexpectedly persisted encrypted password"
+$firstRunConfigPath = Join-Path $firstRunUserData "config.sqlite"
+if (Test-Path $firstRunConfigPath) {
+  $firstRunConfigText = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($firstRunConfigPath))
+  if ($firstRunConfigText.Contains("encryptedPassword")) {
+    throw "First-run config unexpectedly persisted encrypted password"
+  }
 }
 Remove-Item -LiteralPath $firstRunUserData -Recurse -Force -ErrorAction SilentlyContinue
 
@@ -349,11 +352,11 @@ if ($started) {
 }
 Get-Process | Where-Object { $_.Path -like "*wa-app-electron*WA App.exe*" } | Stop-Process -Force -ErrorAction SilentlyContinue
 
-$configPath = Join-Path $userData "config.json"
+$configPath = Join-Path $userData "config.sqlite"
 if (!(Test-Path $configPath)) {
   throw "Smoke config was not created"
 }
-$configText = Get-Content $configPath -Raw
+$configText = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($configPath))
 if ($configText.Contains($Password)) {
   throw "Smoke config leaked plaintext password"
 }

@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, safeStorage } from 'electron';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createServer } from 'node:net';
 import { createServer as createHttpServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -22,6 +22,7 @@ import {
   type StoredConfig,
 } from './config.js';
 import { smsbowerWhatsAppService } from './smsbower.js';
+import { ConfigStore, createConfigStore, migrateConfigFromJson } from './config-store.js';
 import {
   createSMSCancelQueueStore,
   SMSCancelQueueService,
@@ -76,6 +77,7 @@ let localPort = 0;
 let openAIPhoneBridge: HttpServer | null = null;
 let smsCancelQueue: SMSCancelQueueService | null = null;
 let smsCancelQueueError = '';
+let configStore: ConfigStore | null = null;
 const openAIPhoneBridgePort = 17391;
 const openAIPhoneTasks = new Map<string, {
   input: OpenAIPhoneCheckInput;
@@ -90,19 +92,16 @@ function configPath() {
   return join(app.getPath('userData'), 'config.json');
 }
 
+function configStorePath() {
+  return join(app.getPath('userData'), 'config.sqlite');
+}
+
 function testConfigFromEnv(): ClientConfigPatch | null {
   return parseTestConfig(process.env.WA_APP_ELECTRON_TEST_CONFIG);
 }
 
 function readConfig(): StoredConfig {
-  try {
-    const path = configPath();
-    if (!existsSync(path)) return defaultConfig(app.getPath('userData'));
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<StoredConfig>;
-    return normalizeConfig({ ...defaultConfig(app.getPath('userData')), ...parsed });
-  } catch {
-    return defaultConfig(app.getPath('userData'));
-  }
+  return configStore?.load() ?? defaultConfig(app.getPath('userData'));
 }
 
 function normalizeConfig(config: StoredConfig): StoredConfig {
@@ -114,9 +113,7 @@ function publicConfig(config = readConfig()): ClientConfig {
 }
 
 function writeConfig(next: StoredConfig) {
-  const path = configPath();
-  mkdirSync(join(path, '..'), { recursive: true });
-  writeFileSync(path, JSON.stringify(normalizeConfig(next), null, 2), 'utf8');
+  configStore?.save(next);
 }
 
 function setPassword(config: StoredConfig, password?: string) {
@@ -609,6 +606,8 @@ function saveWindowState(window: BrowserWindow | null) {
 }
 
 app.whenReady().then(async () => {
+  configStore = await createConfigStore(configStorePath(), app.getPath('userData'));
+  migrateConfigFromJson(configStore, configPath());
   const testConfig = testConfigFromEnv();
   if (testConfig) {
     const next = applyConfigPatch(readConfig(), testConfig);
@@ -659,6 +658,8 @@ app.on('window-all-closed', () => {
   stopOpenAIPhoneBridge();
   smsCancelQueue?.close();
   smsCancelQueue = null;
+  configStore?.close();
+  configStore = null;
   if (process.platform !== 'darwin') app.quit();
 });
 
