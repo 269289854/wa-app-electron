@@ -71,6 +71,17 @@ let mockSMSBowerStatusCalls = 0;
 
 const userDataDirOverride = process.env.WA_APP_ELECTRON_USER_DATA_DIR?.trim();
 if (userDataDirOverride) app.setPath('userData', userDataDirOverride);
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+}
+app.on('second-instance', () => {
+  const window = mainWindow;
+  if (!window) return;
+  if (window.isMinimized()) window.restore();
+  if (!window.isVisible()) window.show();
+  window.focus();
+});
 let mainWindow: BrowserWindow | null = null;
 let localProcess: ChildProcessWithoutNullStreams | null = null;
 let localPort = 0;
@@ -606,6 +617,7 @@ function saveWindowState(window: BrowserWindow | null) {
 }
 
 app.whenReady().then(async () => {
+  if (!gotSingleInstanceLock) return;
   configStore = await createConfigStore(configStorePath(), app.getPath('userData'));
   migrateConfigFromJson(configStore, configPath());
   const testConfig = testConfigFromEnv();
