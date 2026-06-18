@@ -17,6 +17,7 @@ $serverInfoPath = Join-Path $workDir "server-info.json"
 $summaryPath = Join-Path $workDir "summary.json"
 $userData = Join-Path $workDir "user-data"
 
+# Mock API fixture served to the packaged Electron app.
 $mockApi = @'
 const fs = require('fs');
 const http = require('http');
@@ -212,6 +213,7 @@ server.listen(0, '127.0.0.1', () => {
 process.on('SIGTERM', () => server.close(() => process.exit(0)));
 '@
 
+# Chrome DevTools Protocol inspector that drives the Electron UI.
 $inspectUi = @'
 const fs = require('fs');
 const http = require('http');
@@ -775,10 +777,12 @@ main().catch((error) => {
 });
 '@
 
-Set-Content -LiteralPath $mockScript -Value $mockApi -Encoding UTF8
-Set-Content -LiteralPath $inspectScript -Value $inspectUi -Encoding UTF8
-$mockProcess = Start-Process -FilePath "node" -ArgumentList $mockScript, $serverInfoPath -PassThru -WindowStyle Hidden
-try {
+function Write-SmokeArtifacts {
+  Set-Content -LiteralPath $mockScript -Value $mockApi -Encoding UTF8
+  Set-Content -LiteralPath $inspectScript -Value $inspectUi -Encoding UTF8
+}
+
+function Wait-MockApi {
   $deadline = (Get-Date).AddSeconds(10)
   while (!(Test-Path $serverInfoPath)) {
     if ((Get-Date) -gt $deadline) {
@@ -786,10 +790,15 @@ try {
     }
     Start-Sleep -Milliseconds 200
   }
-  $serverInfo = Get-Content $serverInfoPath -Raw | ConvertFrom-Json
-  $configJson = @{
+  return Get-Content $serverInfoPath -Raw | ConvertFrom-Json
+}
+
+function New-SmokeConfigJson {
+  param([string]$RemoteBaseUrl)
+
+  return @{
     mode = "remote"
-    remoteBaseUrl = $serverInfo.baseUrl
+    remoteBaseUrl = $RemoteBaseUrl
     password = "mock-password"
     smsProvider = "smsbower"
     smsbowerApiKey = "mock-smsbower-key"
@@ -807,30 +816,71 @@ try {
       otpTimeoutSeconds = 30
     }
   } | ConvertTo-Json -Compress
+}
+
+function Set-SmokeEnvironment {
+  param([string]$ConfigJson)
+
   $env:WA_APP_ELECTRON_USER_DATA_DIR = $userData
-  $env:WA_APP_ELECTRON_TEST_CONFIG = $configJson
+  $env:WA_APP_ELECTRON_TEST_CONFIG = $ConfigJson
   $env:WA_APP_ELECTRON_MOCK_SMSBOWER = "1"
   $env:WA_APP_ELECTRON_MOCK_OPENAI_PHONE = "rate_limit"
+}
+
+function Clear-SmokeEnvironment {
+  Remove-Item Env:\WA_APP_ELECTRON_USER_DATA_DIR -ErrorAction SilentlyContinue
+  Remove-Item Env:\WA_APP_ELECTRON_TEST_CONFIG -ErrorAction SilentlyContinue
+  Remove-Item Env:\WA_APP_ELECTRON_MOCK_SMSBOWER -ErrorAction SilentlyContinue
+  Remove-Item Env:\WA_APP_ELECTRON_MOCK_OPENAI_PHONE -ErrorAction SilentlyContinue
+}
+
+function Start-SmokeElectron {
   $process = Start-Process -FilePath $exe -ArgumentList "--remote-debugging-port=$DebugPort" -WorkingDirectory $root -PassThru -WindowStyle Hidden
   Start-Sleep -Seconds 8
   if ($process.HasExited) {
     throw "Electron process exited too early"
   }
-  & node $inspectScript $DebugPort $summaryPath $serverInfo.baseUrl
+  return $process
+}
+
+function Invoke-UiInspection {
+  param([string]$BaseUrl)
+
+  & node $inspectScript $DebugPort $summaryPath $BaseUrl
   if ($LASTEXITCODE -ne 0) {
     throw "Mock UI inspection failed"
   }
-  Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+}
+
+function Stop-SmokeProcesses {
+  param(
+    [System.Diagnostics.Process]$AppProcess,
+    [System.Diagnostics.Process]$MockProcess
+  )
+
+  if ($AppProcess -and !$AppProcess.HasExited) {
+    Stop-Process -Id $AppProcess.Id -Force -ErrorAction SilentlyContinue
+  }
+  Get-Process | Where-Object { $_.Path -like "*wa-app-electron*WA App.exe*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+  if ($MockProcess -and !$MockProcess.HasExited) {
+    Stop-Process -Id $MockProcess.Id -Force -ErrorAction SilentlyContinue
+  }
+}
+
+Write-SmokeArtifacts
+$mockProcess = $null
+$process = $null
+try {
+  $mockProcess = Start-Process -FilePath "node" -ArgumentList $mockScript, $serverInfoPath -PassThru -WindowStyle Hidden
+  $serverInfo = Wait-MockApi
+  Set-SmokeEnvironment -ConfigJson (New-SmokeConfigJson -RemoteBaseUrl $serverInfo.baseUrl)
+  $process = Start-SmokeElectron
+  Invoke-UiInspection -BaseUrl $serverInfo.baseUrl
+  Stop-SmokeProcesses -AppProcess $process -MockProcess $null
   $summary = Get-Content $summaryPath -Raw
   Write-Output "mock_ui_smoke=ok summary=$summary"
 } finally {
-  Remove-Item Env:\WA_APP_ELECTRON_USER_DATA_DIR -ErrorAction SilentlyContinue
-  Remove-Item Env:\WA_APP_ELECTRON_TEST_CONFIG -ErrorAction SilentlyContinue
-  Remove-Item Env:\WA_APP_ELECTRON_MOCK_SMSBOWER -ErrorAction SilentlyContinue
-  Remove-Item Env:\WA_APP_ELECTRON_MOCK_OPENAI_PHONE -ErrorAction SilentlyContinue
-  Get-Process | Where-Object { $_.Path -like "*wa-app-electron*WA App.exe*" } | Stop-Process -Force -ErrorAction SilentlyContinue
-  if ($mockProcess -and !$mockProcess.HasExited) {
-    Stop-Process -Id $mockProcess.Id -Force -ErrorAction SilentlyContinue
-  }
+  Clear-SmokeEnvironment
+  Stop-SmokeProcesses -AppProcess $process -MockProcess $mockProcess
   Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
 }
