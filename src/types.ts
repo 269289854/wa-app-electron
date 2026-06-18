@@ -104,6 +104,7 @@ export type WorkflowResponse = {
   success?: boolean;
   passed?: boolean;
   request_failed?: boolean;
+  retry_after_seconds?: number;
   status?: string;
   error_message?: string;
   reject_reason?: string;

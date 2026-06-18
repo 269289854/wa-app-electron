@@ -6,10 +6,14 @@ export type ProbeStatus = {
   canRegister: boolean;
   blocked: boolean;
   requestFailed: boolean;
+  registered?: boolean;
+  accountReachable?: boolean;
   accountFlow: string;
   smsAvailable?: boolean;
   waitSeconds: number | null;
+  waitUntil: string;
   reason: string;
+  proxyText: string;
   methods: Array<{ code: string; label: string; available?: boolean; waitSeconds: number | null }>;
 };
 
@@ -46,28 +50,43 @@ export function probeStatus(result?: WorkflowResponse | null): ProbeStatus {
       requestFailed: false,
       accountFlow: '',
       waitSeconds: null,
+      waitUntil: '',
       reason: '',
+      proxyText: '',
       methods: [],
     };
   }
   const phoneStatus = record(result.phone_status);
   const accountProbe = record(result.account_probe);
   const smsProbe = record(result.sms_probe);
-  const blocked = boolValue(phoneStatus.blocked, accountProbe.blocked) ?? textHas(['blocked'], result.reject_reason, result.error_message, result.status, phoneStatus.account_raw_reason, accountProbe.raw_reason);
-  const flow = textValue(phoneStatus.account_flow, accountProbe.account_flow) || deriveFlow(result, phoneStatus, accountProbe, blocked);
-  const waitSeconds = numberValue(phoneStatus.sms_wait_seconds, smsProbe.sms_wait_seconds, smsProbe.wait_seconds, smsProbe.retry_after_seconds, smsProbe.cooldown_seconds, accountProbe.sms_wait_seconds);
-  const smsAvailable = boolValue(phoneStatus.sms_available, phoneStatus.can_receive_sms, smsProbe.sms_available, smsProbe.can_send_sms, accountProbe.can_send_sms);
-  const requestFailed = Boolean(result.success === false || result.request_failed || textHas(['network', 'proxy', 'unreachable', 'invalid_skey', 'bad_token', 'missing_param', 'bad_param'], result.error_message, result.status));
-  const methods = methodStatuses(phoneStatus.method_statuses, accountProbe.method_statuses, result.method_statuses, record(result.verification_request).method_statuses);
+  const proxy = record(result.proxy);
+  const verificationRequest = record(result.verification_request);
+  const registered = boolValue(phoneStatus.registered, accountProbe.registered) ?? statusIn(['registered', 'exists', 'account_exists'], phoneStatus.account_raw_status, accountProbe.raw_status, accountProbe.status);
+  const blocked = boolValue(phoneStatus.blocked, accountProbe.blocked) ?? textHas(['blocked'], result.reject_reason, result.error_message, result.status, phoneStatus.account_raw_status, accountProbe.raw_status, accountProbe.status, phoneStatus.account_raw_reason, accountProbe.raw_reason);
+  const accountReachable = boolValue(phoneStatus.account_reachable, accountProbe.success) ?? statusIn(['reachable', 'account_probe_status_reachable', 'ok', 'sent', 'valid', 'exists', 'incorrect'], phoneStatus.account_status, accountProbe.account_status, accountProbe.status, accountProbe.raw_status, accountProbe.raw_reason);
+  const waitSeconds = numberValue(phoneStatus.sms_wait_seconds, result.retry_after_seconds, smsProbe.sms_wait_seconds, smsProbe.wait_seconds, smsProbe.retry_after_seconds, smsProbe.cooldown_seconds, smsProbe.remaining_seconds, accountProbe.sms_wait_seconds);
+  const waitUntil = textValue(phoneStatus.sms_wait_until, smsProbe.sms_wait_until, smsProbe.wait_until, smsProbe.retry_after_at, smsProbe.cooldown_until);
+  const smsAvailable = boolValue(phoneStatus.sms_available, phoneStatus.can_receive_sms, smsProbe.sms_available, smsProbe.can_send_sms, smsProbe.can_receive_sms, accountProbe.can_send_sms) ?? statusIn(['available', 'sms_available', 'sent', 'waiting', 'ok'], phoneStatus.sms_status, smsProbe.sms_status, smsProbe.status);
+  const flow = textValue(phoneStatus.account_flow, accountProbe.account_flow) || deriveFlow(result, phoneStatus, accountProbe, { registered, blocked, smsAvailable });
+  const accountStatus = textValue(phoneStatus.account_status, accountProbe.account_status, accountProbe.status);
+  const accountRawReason = textValue(phoneStatus.account_raw_reason, accountProbe.raw_reason, phoneStatus.account_error, accountProbe.error_message);
+  const accountError = textValue(phoneStatus.account_error, accountProbe.error_message);
+  const rejectReason = textValue(phoneStatus.reject_reason, result.reject_reason, result.error_message, result.status);
+  const explicitRequestFailed = boolValue(phoneStatus.request_failed, result.request_failed);
+  const requestFailed = explicitRequestFailed ?? Boolean(result.success === false && flow !== 'registered' && (accountRejected(accountStatus, accountRawReason, accountError) || requestFailure(rejectReason, result.error_message, result.status)));
+  const methods = methodStatuses(phoneStatus.method_statuses, accountProbe.method_statuses, result.method_statuses, verificationRequest.method_statuses);
   const hasAvailableMethod = methods.some((method) => method.available === true && !method.waitSeconds);
-  const canRegister = !blocked && !requestFailed && flow !== 'invalid_number' && flow !== 'rate_limited' && (hasAvailableMethod || smsAvailable === true);
+  const explicitCanRegister = boolValue(phoneStatus.can_register);
+  const canRegister = explicitCanRegister !== false && !blocked && !requestFailed && accountReachable !== false && flow !== 'invalid_number' && flow !== 'rate_limited' && (hasAvailableMethod || smsAvailable === true);
   const reason = reasonLabel(textValue(result.error_message, result.reject_reason, phoneStatus.account_raw_reason, accountProbe.raw_reason, accountProbe.error_message, result.status));
-  if (blocked) return { label: '号码封禁', tone: 'bad', canRegister: false, blocked: true, requestFailed, accountFlow: flow, smsAvailable, waitSeconds, reason: reason || '号码被 WA 拒绝或封禁', methods };
-  if (flow === 'invalid_number') return { label: '号码异常', tone: 'warn', canRegister: false, blocked: false, requestFailed, accountFlow: flow, smsAvailable, waitSeconds, reason: reason || '号码格式不符合规则', methods };
-  if (flow === 'rate_limited' || (waitSeconds && waitSeconds > 0)) return { label: '请求冷却', tone: 'warn', canRegister: false, blocked: false, requestFailed, accountFlow: flow, smsAvailable, waitSeconds, reason: reason || '请求过于频繁', methods };
-  if (requestFailed) return { label: '请求失败', tone: 'bad', canRegister: false, blocked: false, requestFailed, accountFlow: flow, smsAvailable, waitSeconds, reason: reason || '远程服务返回失败', methods };
-  if (canRegister) return { label: '可发起注册', tone: 'ok', canRegister, blocked: false, requestFailed, accountFlow: flow, smsAvailable, waitSeconds, reason, methods };
-  return { label: '等待可用通道', tone: 'idle', canRegister, blocked: false, requestFailed, accountFlow: flow, smsAvailable, waitSeconds, reason, methods };
+  const proxyText = [textValue(proxy.proxy_mode), textValue(proxy.country_code)].filter(Boolean).join(' · ');
+  const base = { registered, accountReachable, smsAvailable, waitSeconds, waitUntil, proxyText, methods };
+  if (blocked) return { ...base, label: '号码封禁', tone: 'bad', canRegister: false, blocked: true, requestFailed, accountFlow: flow, reason: reason || '号码被 WA 拒绝或封禁' };
+  if (flow === 'invalid_number') return { ...base, label: '号码异常', tone: 'warn', canRegister: false, blocked: false, requestFailed, accountFlow: flow, reason: reason || '号码格式不符合规则' };
+  if (flow === 'rate_limited' || (waitSeconds && waitSeconds > 0)) return { ...base, label: '请求冷却', tone: 'warn', canRegister: false, blocked: false, requestFailed, accountFlow: flow, reason: reason || '请求过于频繁' };
+  if (requestFailed) return { ...base, label: '请求失败', tone: 'bad', canRegister: false, blocked: false, requestFailed, accountFlow: flow, reason: reason || '远程服务返回失败' };
+  if (canRegister) return { ...base, label: '可发起注册', tone: 'ok', canRegister, blocked: false, requestFailed, accountFlow: flow, reason };
+  return { ...base, label: '等待可用通道', tone: 'idle', canRegister, blocked: false, requestFailed, accountFlow: flow, reason };
 }
 
 export function methodLabel(code: string) {
@@ -79,7 +98,9 @@ export function statusReason(status: ProbeStatus) {
   const parts = [
     status.reason,
     status.smsAvailable === true ? 'SMS 可用' : status.smsAvailable === false ? 'SMS 不可用' : '',
+    status.waitUntil ? `冷却到 ${status.waitUntil}` : '',
     status.waitSeconds ? `冷却 ${formatDuration(status.waitSeconds)}` : '',
+    status.proxyText ? `代理 ${status.proxyText}` : '',
   ];
   return parts.filter(Boolean).join(' · ');
 }
@@ -127,12 +148,17 @@ function textHas(needles: string[], ...values: unknown[]) {
   return Boolean(text && needles.some((needle) => text.includes(needle)));
 }
 
-function deriveFlow(result: WorkflowResponse, phoneStatus: Record<string, unknown>, accountProbe: Record<string, unknown>, blocked: boolean) {
+function statusIn(expected: string[], ...values: unknown[]) {
+  const normalized = values.map(textValue).join(' ').trim().toLowerCase();
+  return normalized ? expected.some((value) => normalized.includes(value)) : undefined;
+}
+
+function deriveFlow(result: WorkflowResponse, phoneStatus: Record<string, unknown>, accountProbe: Record<string, unknown>, input: { registered?: boolean; blocked?: boolean; smsAvailable?: boolean }) {
   const raw = [result.status, result.error_message, result.reject_reason, phoneStatus.account_status, phoneStatus.account_raw_status, phoneStatus.account_raw_reason, accountProbe.status, accountProbe.raw_status, accountProbe.raw_reason].map(textValue).join(' ').toLowerCase();
-  if (blocked || raw.includes('blocked')) return 'blocked';
+  if (input.registered === true || raw.includes('registered') || raw.includes('exists')) return 'registered';
+  if (input.blocked === true || raw.includes('blocked')) return 'blocked';
   if (raw.includes('format_wrong') || raw.includes('length_short') || raw.includes('length_long') || raw.includes('invalid_number')) return 'invalid_number';
   if (raw.includes('too_recent') || raw.includes('too_many') || raw.includes('rate_limited') || raw.includes('temporarily_unavailable')) return 'rate_limited';
-  if (raw.includes('registered') || raw.includes('exists')) return 'registered';
   if (raw.includes('not_registered')) return 'not_registered';
   return 'unknown';
 }
@@ -166,8 +192,25 @@ function addMethod(seen: Map<string, { code: string; label: string; available?: 
     code,
     label: methodLabel(code),
     available: previous?.available ?? boolValue(item.available, item.eligible, item.enabled),
-    waitSeconds: numberValue(item.cooldown_seconds, item.wait_seconds, item.retry_after_seconds, previous?.waitSeconds),
+    waitSeconds: numberValue(item.cooldown_seconds, item.wait_seconds, item.retry_after_seconds, durationSeconds(item.cooldown), previous?.waitSeconds),
   });
+}
+
+function durationSeconds(value: unknown) {
+  if (typeof value !== 'string') return null;
+  const match = /^(\d+(?:\.\d+)?)s$/.exec(value.trim());
+  return match ? Number(match[1]) : null;
+}
+
+function accountRejected(...values: string[]) {
+  const normalized = values.join(' ').toLowerCase();
+  return normalized.includes('account_probe_status_rejected') || normalized.includes('invalid_skey') || normalized.includes('bad_token') || normalized.includes('missing_param') || normalized.includes('bad_param') || normalized.includes('old_version');
+}
+
+function requestFailure(...values: unknown[]) {
+  const normalized = values.map(textValue).join(' ').toLowerCase();
+  if (!normalized || normalized.includes('already registered') || normalized.includes('number is blocked') || normalized.includes('cooling down') || normalized.includes('sms route unavailable')) return false;
+  return normalized.startsWith('account probe rejected') || normalized.startsWith('account probe request') || normalized.includes('network') || normalized.includes('unreachable') || normalized.includes('dynamic ip') || normalized.includes('proxy') || normalized.includes(' eof') || normalized.includes('invalid_skey') || normalized.includes('bad_token') || normalized.includes('missing_param') || normalized.includes('bad_param');
 }
 
 function reasonLabel(value: string) {
