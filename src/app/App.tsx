@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router';
 import {
   ListChecks,
@@ -15,7 +15,6 @@ import {
 } from 'lucide-react';
 import {
   accountID,
-  accountTitle,
   getAccounts,
   getConnections,
 } from '../api';

@@ -18,7 +18,6 @@ import {
   writeConfig,
   type ClientConfigPatch,
 } from './config-service.js';
-import { errorMessage } from './errors.js';
 import { serviceStatus, startLocalService, stopLocalService } from './local-service.js';
 import {
   startOpenAIPhoneBridge,

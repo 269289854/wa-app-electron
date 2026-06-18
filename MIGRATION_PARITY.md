@@ -16,7 +16,7 @@ This file is the handoff record for keeping the Electron desktop client in sync 
 
 All currently working `webui/src/dashboard` WA features from upstream are represented in the desktop client.
 
-The upstream WebUI API surface used by `webui/src/dashboard/wa-api.ts` is covered by desktop helpers or calls in `src/api.ts` and `src/main.tsx`.
+The upstream WebUI API surface used by `webui/src/dashboard/wa-api.ts` is covered by desktop helpers or calls in `src/api.ts`, `src/app/App.tsx`, and `src/features/*`.
 
 Covered upstream endpoint families:
 
@@ -62,22 +62,44 @@ Desktop-only or desktop-expanded WA capabilities:
 
 | Upstream WebUI area | Upstream files | Desktop implementation | Status |
 | --- | --- | --- | --- |
-| Account rail, list, pagination, search, delete | `wa-account-rail.tsx`, `wa-page.tsx`, `wa-account-info-page.tsx` | `src/main.tsx`, `src/api.ts` | Synced |
-| Account profile and info | `wa-account-detail.tsx`, `wa-account-profile-settings.tsx` | `ProfileCard`, `AccountInfoCard` in `src/main.tsx` | Synced |
-| Profile picture display/upload/remove | `wa-account-avatar.tsx`, `wa-account-profile-settings.tsx`, `wa-api.ts` | `RemoteAvatar`, `ProfileCard`, `assetDataUrl`, profile APIs | Synced |
-| 2FA PIN and account email | `wa-account-security.tsx`, `wa-account-security-model.ts` | `SecurityCard`, `normalizeTwoFactorStatus`, account settings APIs | Synced |
-| Email OTP request/verify | `wa-account-security.tsx` | `SecurityCard`, `requestEmailOtp`, `verifyEmailOtp` | Synced |
-| Login state check | `wa-api.ts` | `LoginStateCheckCard`, `checkLoginState` | Synced |
-| Device fingerprint/client profiles | `wa-device-fingerprint.tsx` | `ProfilesList`, `ProfileFingerprintBlock` | Synced |
-| Long connection badge/status | `wa-long-connection-badge.tsx` | account rail status and connection query in `src/main.tsx` | Synced |
-| Contacts list and auto-resolve | `wa-contact-list.tsx`, `wa-contact-resolve.ts` | `ContactList`, `resolveContacts`, `normalizeContacts` | Synced |
-| Chat thread, rich text, send message | `wa-chat-thread.tsx`, `wa-message-content.tsx`, `wa-chat-model.ts` | `Thread`, `MessageBubble`, `messageText`, message APIs | Synced |
-| Mark read/delete message/delete contact | `wa-inbox.tsx`, `wa-api.ts` | `markMessagesRead`, `deleteMessages`, `deleteContact` | Synced |
-| Account OTP messages | `wa-contact-otp-banner.tsx`, `wa-inbox.tsx` | `MessageMiniList`, OTP query, mock smoke coverage | Synced |
-| Phone probe and registration | `wa-account-add.tsx`, `wa-registration-channel-buttons.tsx`, `wa-result-model.ts` | `AddAccountPanel`, `probeStatus`, `registrationMethods` | Synced |
-| Registration OTP resume | `wa-registration-otp-card.tsx`, `wa-account-detail.tsx` | add-account OTP panel and `ManualOtpCard` | Synced |
-| Account transfer challenge during registration | `wa-api.ts`, registration response model | `RegistrationRecoveryPanel`, refresh/poll helpers | Synced |
-| Registration cleanup/persist login state | Upstream backend action, not WebUI surfaced in the audited commit | `RegistrationRecoveryPanel` | Desktop expanded |
+| Account rail, list, pagination, search, delete | `wa-account-rail.tsx`, `wa-page.tsx`, `wa-account-info-page.tsx` | `src/app/App.tsx`, `src/features/accounts/`, `src/api.ts` | Synced |
+| Account profile and info | `wa-account-detail.tsx`, `wa-account-profile-settings.tsx` | `src/features/accounts/AccountPanel.tsx`, `src/features/accounts/AccountWidgets.tsx` | Synced |
+| Profile picture display/upload/remove | `wa-account-avatar.tsx`, `wa-account-profile-settings.tsx`, `wa-api.ts` | `src/features/accounts/AccountWidgets.tsx`, `src/shared/avatar.ts`, profile APIs | Synced |
+| 2FA PIN and account email | `wa-account-security.tsx`, `wa-account-security-model.ts` | `src/features/accounts/AccountWidgets.tsx`, account settings APIs | Synced |
+| Email OTP request/verify | `wa-account-security.tsx` | `src/features/accounts/AccountWidgets.tsx`, `requestEmailOtp`, `verifyEmailOtp` | Synced |
+| Login state check | `wa-api.ts` | `src/features/accounts/AccountWidgets.tsx`, `checkLoginState` | Synced |
+| Device fingerprint/client profiles | `wa-device-fingerprint.tsx` | `src/features/accounts/AccountWidgets.tsx` | Synced |
+| Long connection badge/status | `wa-long-connection-badge.tsx` | account rail status and connection query in `src/app/App.tsx` / `src/features/accounts/AccountRow.tsx` | Synced |
+| Contacts list and auto-resolve | `wa-contact-list.tsx`, `wa-contact-resolve.ts` | `src/features/chat/ChatPanel.tsx`, `src/features/chat/contact-model.ts` | Synced |
+| Chat thread, rich text, send message | `wa-chat-thread.tsx`, `wa-message-content.tsx`, `wa-chat-model.ts` | `src/features/chat/ChatPanel.tsx`, message APIs | Synced |
+| Mark read/delete message/delete contact | `wa-inbox.tsx`, `wa-api.ts` | `src/features/chat/ChatPanel.tsx`, `markMessagesRead`, `deleteMessages`, `deleteContact` | Synced |
+| Account OTP messages | `wa-contact-otp-banner.tsx`, `wa-inbox.tsx` | `src/features/accounts/AccountWidgets.tsx`, OTP query, mock smoke coverage | Synced |
+| Phone probe and registration | `wa-account-add.tsx`, `wa-registration-channel-buttons.tsx`, `wa-result-model.ts` | `src/features/registration/AddAccountPanel.tsx`, `src/features/registration/registration-task.ts`, `src/result-model.ts` | Synced |
+| Registration OTP resume | `wa-registration-otp-card.tsx`, `wa-account-detail.tsx` | `src/features/registration/AddAccountPanel.tsx`, `ManualOtpCard` in `src/features/accounts/AccountWidgets.tsx` | Synced |
+| Account transfer challenge during registration | `wa-api.ts`, registration response model | `src/features/registration/RegistrationRecoveryPanel.tsx`, `src/features/registration/workflow-model.ts` | Synced |
+| Registration cleanup/persist login state | Upstream backend action, not WebUI surfaced in the audited commit | `src/features/registration/RegistrationRecoveryPanel.tsx` | Desktop expanded |
+
+## Code Organization Map
+
+Use these entry points before making desktop changes:
+
+- `src/main.tsx`: React root only (`QueryClientProvider`, `HashRouter`, `App` mount).
+- `src/app/App.tsx`: desktop shell, sidebar account rail, top bar, route/view switching, cross-feature query invalidation.
+- `src/features/accounts/`: account details, security settings, profile picture, login state, client profiles, manual pending-account OTP.
+- `src/features/chat/`: contact list, chat thread, send/read/delete flows.
+- `src/features/registration/`: add-account flow, registration OTP, account-transfer recovery, SMSBower/Hero-SMS registration task, registration debug records.
+- `src/features/settings/`: remote/local service settings and SMS platform settings.
+- `src/features/cancel-queue/`: SMS activation cancel queue UI and queue view helpers.
+- `src/shared/`: reusable UI, toast types, avatar crop, error and formatting helpers.
+- `src/styles/index.css`: renderer style entry. Domain styles live in `src/styles/*.css`; do not recreate a single large stylesheet.
+- `electron/main.ts`: Electron lifecycle, window creation, and IPC registration only.
+- `electron/config-service.ts`: config loading, secure password/API-key patching, public config projection.
+- `electron/api-proxy.ts`: `/api/wa/...` proxy, asset fetch, connection test.
+- `electron/local-service.ts`: packaged `wa-app-service` process management.
+- `electron/openai-phone-bridge.ts`: OpenAI phone check bridge HTTP server and pending task queue.
+- `electron/sms-platform-ipc.ts`: SMSBower/Hero-SMS platform calls and mock SMS platform behavior.
+- `electron/sms-cancel-queue-ipc.ts`: cancel queue service lifecycle and IPC-facing helpers.
+- `scripts/smoke-mock-ui.ps1`: packaged-app mock UI smoke. PowerShell helpers are at the bottom; the mock API and CDP inspector are embedded JS fixtures.
 
 ## Do Not Migrate Yet
 
@@ -118,7 +140,8 @@ Use this sequence when `pood1e/wa-app` changes:
 
    - Upstream: `webui/src/dashboard/wa-api.ts`
    - Desktop: `src/api.ts`
-   - Desktop UI: `src/main.tsx`
+   - Desktop shell: `src/app/App.tsx`
+   - Desktop feature folders: `src/features/accounts`, `src/features/chat`, `src/features/registration`
    - Desktop smoke: `scripts/smoke-mock-ui.ps1`
 
 3. Check upstream route and page changes.
@@ -144,7 +167,7 @@ Use this sequence when `pood1e/wa-app` changes:
    Suggested phase order:
 
    - API/types helpers in `src/api.ts` and `src/types.ts`
-   - UI integration in `src/main.tsx`
+   - UI integration in the matching `src/features/*` folder plus shell wiring in `src/app/App.tsx` only when navigation/sidebar behavior changes
    - Result parsing/model updates in `src/result-model.ts` or small helpers
    - Mock smoke coverage in `scripts/smoke-mock-ui.ps1`
    - Documentation update in this file and `README.md` if the user-facing matrix changes
@@ -196,4 +219,3 @@ Additional verification after re-auditing upstream:
 
 - `npm test`: passed, 18 test files, 136 tests
 - `git status --short --branch`: clean at the time this file was added
-
