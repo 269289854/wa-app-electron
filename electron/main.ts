@@ -398,9 +398,16 @@ async function findFreePort() {
 
 function serviceExecutablePath() {
   const name = process.platform === 'win32' ? 'wa-app-service.exe' : 'wa-app-service';
-  return app.isPackaged
-    ? join(process.resourcesPath, 'resources', 'wa-app-service', name)
-    : join(app.getAppPath(), 'resources', 'wa-app-service', name);
+  const serviceRoot = app.isPackaged
+    ? join(process.resourcesPath, 'resources', 'wa-app-service')
+    : join(app.getAppPath(), 'resources', 'wa-app-service');
+  const archDir = process.platform === 'win32'
+    ? process.arch === 'ia32'
+      ? 'win-ia32'
+      : 'win-x64'
+    : process.platform;
+  const archPath = join(serviceRoot, archDir, name);
+  return existsSync(archPath) ? archPath : join(serviceRoot, name);
 }
 
 async function startLocalService() {

@@ -218,14 +218,7 @@ function DesktopApp() {
           ) : null}
         </div>
         <nav className="bottom-nav">
-          <button className={view === 'chats' ? 'active' : ''} onClick={() => setView('chats')}>
-            <MessageCircle size={16} />
-            消息
-          </button>
-          <button className={view === 'account' ? 'active' : ''} onClick={() => setView('account')}>
-            <ShieldCheck size={16} />
-            账号
-          </button>
+          <PrimaryViewTabs view={view} onChange={setView} />
           <button className={view === 'cancel-queue' ? 'active' : ''} onClick={() => setView('cancel-queue')}>
             <ListChecks size={16} />
             取消队列{cancelQueueStatusQuery.data?.active ? ` (${cancelQueueStatusQuery.data.active})` : ''}
@@ -284,6 +277,34 @@ function DesktopApp() {
         )}
       </main>
       <ToastStack toasts={toasts} />
+    </div>
+  );
+}
+
+function PrimaryViewTabs({ view, onChange }: { view: View; onChange: (view: View) => void }) {
+  const tabs: Array<{ view: View; label: string; icon: React.ReactNode }> = [
+    { view: 'chats', label: '消息', icon: <MessageCircle size={15} /> },
+    { view: 'account', label: '账号', icon: <ShieldCheck size={15} /> },
+  ];
+  return (
+    <div className="view-tabs" role="tablist" aria-label="主视图">
+      {tabs.map((tab) => {
+        const active = view === tab.view;
+        return (
+          <button
+            aria-selected={active}
+            className={`view-tab ${active ? 'active' : ''}`}
+            key={tab.view}
+            onClick={() => onChange(tab.view)}
+            role="tab"
+            title={tab.label}
+            type="button"
+          >
+            {tab.icon}
+            {tab.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

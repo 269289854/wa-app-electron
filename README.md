@@ -7,7 +7,7 @@ WA App 的 Electron + React + Vite + TypeScript 全平台桌面客户端。
 - 默认连接远程服务 `https://wa.yizhimeng.uk`，访问密码只通过本机设置或运行时环境变量提供，不写入源码、README 或提交历史。
 - Electron 主进程提供 preload 安全桥，renderer 只通过 `window.waConfig`、`window.waApi`、`window.waService` 调用桌面能力和 `/api/wa/...`。
 - 支持账号列表、账号删除、长连接状态、client profile/设备指纹、注册探测、注册 OTP、联系人、消息、发送文本消息、标记已读、删除消息、联系人删除、联系人自动解析、资料名称、头像上传裁剪、头像移除、2FA PIN、邮箱设置、邮箱 OTP 和远程连接配置。
-- 预留本地内置 `wa-app-service` 模式：后续把对应平台的 `wa-app-service` 二进制放入 `resources/wa-app-service/` 后，可由客户端启动，数据目录默认为 Electron `userData/wa-app-data`。
+- 内置本地 `wa-app-service` 模式：Windows 后端二进制放在 `resources/wa-app-service/win-x64/` 和 `resources/wa-app-service/win-ia32/`，客户端会按当前架构启动，数据目录默认为 Electron `userData/wa-app-data`。
 - Windows/macOS/Linux 打包配置已在 `electron-builder` 中准备：Windows `nsis/zip`，macOS `dmg/zip`，Linux `AppImage/deb`。
 
 ## 开发

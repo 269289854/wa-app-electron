@@ -51,7 +51,7 @@ Remove-Item Env:\WA_APP_ELECTRON_SMOKE_PASSWORD -ErrorAction SilentlyContinue
 [main.ts](electron/main.ts) 支持两种 `mode`：
 
 - `remote`（默认）：连接 `https://wa.yizhimeng.uk`，地址由配置决定。
-- `local`：spawn 打包内 `resources/wa-app-service/wa-app-service(.exe)`，数据目录默认 `userData/wa-app-data`；该二进制当前不在仓库，需后续放入 `resources/`。
+- `local`：spawn 打包内 `resources/wa-app-service/win-x64/wa-app-service.exe` 或 `resources/wa-app-service/win-ia32/wa-app-service.exe`，数据目录默认 `userData/wa-app-data`；运行时按当前进程架构选择，旧的平铺 `resources/wa-app-service/wa-app-service(.exe)` 路径仍作为兼容回退。
 
 `requestJSON`/`requestAsset` 在每次请求注入 `Authorization: Basic wa:<password>`，密码来自加密存储。`/api/wa/health` 不可用时回退到 `/healthz`。
 

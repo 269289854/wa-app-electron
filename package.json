@@ -1,6 +1,6 @@
 {
   "name": "wa-app-electron",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "Cross-platform desktop client for wa-app.",
   "type": "module",

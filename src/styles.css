@@ -141,7 +141,7 @@ button { cursor: pointer; }
   padding: 8px;
   text-align: left;
 }
-.account-row:hover, .account-row.active, .bottom-nav button.active { background: #edf7f1; }
+.account-row:hover, .account-row.active, .bottom-nav > button.active { background: #edf7f1; }
 .account-row strong, .account-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-row small { color: #697586; margin-top: 2px; }
 .connection-dot {
@@ -172,8 +172,8 @@ button { cursor: pointer; }
 }
 .load-more-button:disabled { opacity: 0.65; cursor: default; }
 
-.bottom-nav { display: grid; gap: 6px; border-top: 1px solid #e2e6ec; padding-top: 12px; }
-.bottom-nav button {
+.bottom-nav { display: grid; gap: 8px; border-top: 1px solid #e2e6ec; padding-top: 12px; }
+.bottom-nav > button {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -182,6 +182,35 @@ button { cursor: pointer; }
   background: transparent;
   padding: 10px;
   color: #293443;
+}
+.view-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  min-height: 42px;
+  border: 1px solid #dfe5ec;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 4px;
+}
+.view-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 32px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #526070;
+  font-weight: 700;
+}
+.view-tab:hover { background: #eef7f2; color: #166534; }
+.view-tab.active {
+  background: #dcfce7;
+  color: #166534;
+  box-shadow: 0 1px 4px rgba(22, 101, 52, 0.12);
 }
 
 .workspace { display: grid; grid-template-rows: 56px minmax(0, 1fr); min-width: 0; min-height: 0; }
