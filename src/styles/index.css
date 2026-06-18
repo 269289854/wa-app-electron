@@ -1,9 +1,10 @@
 @import './base.css';
 @import './app-shell.css';
 @import './chat.css';
-@import './page-layout.css';
+@import './layout.css';
+@import './components.css';
 @import './cancel-queue.css';
-@import './settings-registration.css';
-@import './account-profile.css';
-@import './feedback.css';
+@import './settings.css';
+@import './registration.css';
+@import './accounts.css';
 @import './responsive.css';

@@ -91,7 +91,7 @@ Use these entry points before making desktop changes:
 - `src/features/settings/`: remote/local service settings and SMS platform settings.
 - `src/features/cancel-queue/`: SMS activation cancel queue UI and queue view helpers.
 - `src/shared/`: reusable UI, toast types, avatar crop, error and formatting helpers.
-- `src/styles/index.css`: renderer style entry. Domain styles live in `src/styles/*.css`; do not recreate a single large stylesheet.
+- `src/styles/index.css`: renderer style entry. Domain styles live in `base.css`, `layout.css`, `components.css`, `accounts.css`, `chat.css`, `registration.css`, `settings.css`, `cancel-queue.css`, and `responsive.css`; do not recreate a single large stylesheet.
 - `electron/main.ts`: Electron lifecycle, window creation, and IPC registration only.
 - `electron/config-service.ts`: config loading, secure password/API-key patching, public config projection.
 - `electron/api-proxy.ts`: `/api/wa/...` proxy, asset fetch, connection test.
