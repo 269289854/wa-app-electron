@@ -32,6 +32,8 @@ import {
   accountID,
   accountTitle,
   assetDataUrl,
+  checkLoginState,
+  cleanupFailedRegistration,
   contactAvatarPath,
   deleteAccount,
   deleteContact,
@@ -49,9 +51,12 @@ import {
   messageTime,
   normalizeContacts,
   normalizeTwoFactorStatus,
+  persistLoginState,
+  pollAccountTransferRegistration,
   probePhoneSMS,
   registerPhone,
   removeProfilePicture,
+  refreshAccountTransferChallenge,
   resolveContacts,
   requestEmailOtp,
   sendTextMessage,
@@ -597,6 +602,7 @@ function AccountPanel({ account, avatarVersion, notify, onChanged, onAvatarChang
         <ProfileCard key={`profile-${accountId}`} account={account} notify={notify} onChanged={() => { onChanged(); void queryClient.invalidateQueries({ queryKey: ['accounts'] }); }} onAvatarChanged={onAvatarChanged} />
         <AccountInfoCard account={account} />
         <SecurityCard key={`security-${accountId}`} account={account} notify={notify} />
+        <LoginStateCheckCard account={account} profiles={profilesQuery.data?.client_profiles || []} notify={notify} />
         <InfoCard title="设备指纹" icon={<Fingerprint size={17} />}>
           <ProfilesList profiles={profilesQuery.data?.client_profiles || []} loading={profilesQuery.isLoading} />
         </InfoCard>
@@ -635,6 +641,135 @@ function ManualOtpCard({ account, notify, onChanged }: { account: WAAccount; not
           提交
         </button>
       </div>
+      <RegistrationRecoveryPanel accountIDValue={accountId} notify={notify} onChanged={onChanged} />
+    </InfoCard>
+  );
+}
+
+function RegistrationRecoveryPanel({
+  accountIDValue,
+  verificationRequestID,
+  result,
+  notify,
+  onChanged,
+  onDebug,
+}: {
+  accountIDValue?: string;
+  verificationRequestID?: string;
+  result?: WorkflowResponse | null;
+  notify: (kind: Toast['kind'], message: string) => void;
+  onChanged: () => void;
+  onDebug?: (exchange: DebugExchange) => void;
+}) {
+  const [lastResult, setLastResult] = useState<WorkflowResponse | null>(null);
+  const visibleResult = lastResult || result || null;
+  const effectiveVerificationRequestID = verificationRequestID
+    || workflowText(result, 'verification_request_id')
+    || workflowText(lastResult, 'verification_request_id')
+    || nestedText(result, 'verification_request', 'verification_request_id')
+    || nestedText(lastResult, 'verification_request', 'verification_request_id');
+  const effectiveAccountID = accountIDValue
+    || workflowText(result, 'wa_account_id')
+    || workflowText(lastResult, 'wa_account_id')
+    || nestedText(result, 'registration', 'wa_account_id')
+    || nestedText(lastResult, 'registration', 'wa_account_id');
+  const registrationID = nestedText(visibleResult, 'registration', 'registration_id');
+  const clientProfileID = workflowText(visibleResult, 'client_profile_id') || nestedText(visibleResult, 'login_state', 'client_profile_id');
+  const accountTransferWaiting = isAccountTransferWaiting(visibleResult);
+  const challenge = challengeSummary(visibleResult);
+  const hasContext = Boolean(effectiveVerificationRequestID || effectiveAccountID || registrationID || clientProfileID || accountTransferWaiting);
+  const runRecovery = async (path: string, fn: () => Promise<WorkflowResponse>) => {
+    const exchange = debugRequest(path, path, {
+      wa_account_id: effectiveAccountID,
+      verification_request_id: effectiveVerificationRequestID,
+      registration_id: registrationID,
+      client_profile_id: clientProfileID,
+    });
+    onDebug?.(exchange);
+    try {
+      const response = await fn();
+      setLastResult(response);
+      onDebug?.({ ...exchange, response: sanitizeDebugValue(response) });
+      notify(response.success === false || response.error_message ? 'error' : 'success', response.error_message || '注册恢复操作已完成');
+      onChanged();
+      return response;
+    } catch (error) {
+      onDebug?.({ ...exchange, error: debugError(error) });
+      notify('error', errorMessage(error));
+      throw error;
+    }
+  };
+  const refreshMutation = useMutation({
+    mutationFn: () => runRecovery('/api/wa/actions/registration/account-transfer/refresh', () => refreshAccountTransferChallenge(requireValue(effectiveVerificationRequestID, 'verification_request_id'))),
+  });
+  const pollMutation = useMutation({
+    mutationFn: () => runRecovery('/api/wa/actions/registration/account-transfer/poll', () => pollAccountTransferRegistration(requireValue(effectiveVerificationRequestID, 'verification_request_id'), effectiveAccountID, 10)),
+  });
+  const cleanupMutation = useMutation({
+    mutationFn: () => runRecovery('/api/wa/actions/registration/cleanup-failed-account', () => cleanupFailedRegistration({ accountID: effectiveAccountID, verificationRequestID: effectiveVerificationRequestID })),
+  });
+  const persistMutation = useMutation({
+    mutationFn: () => runRecovery('/api/wa/actions/registration/persist-login-state', () => persistLoginState({ registrationID, clientProfileID, registration: visibleResult?.registration })),
+  });
+  if (!hasContext) return null;
+  const busy = refreshMutation.isPending || pollMutation.isPending || cleanupMutation.isPending || persistMutation.isPending;
+  return (
+    <div className="recovery-panel">
+      <div className={`result-banner ${accountTransferWaiting ? 'warn' : visibleResult?.success ? 'ok' : 'idle'}`}>
+        <strong>{accountTransferWaiting ? '账号迁移等待中' : '注册恢复'}</strong>
+        <span>{challenge || '刷新账号迁移挑战、轮询迁移结果、保存登录态或清理失败待注册账号。'}</span>
+      </div>
+      <div className="inline-actions">
+        <button className="secondary-button" disabled={!effectiveVerificationRequestID || busy} onClick={() => refreshMutation.mutate()}>
+          {refreshMutation.isPending ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+          刷新挑战
+        </button>
+        <button className="secondary-button" disabled={!effectiveVerificationRequestID || busy} onClick={() => pollMutation.mutate()}>
+          {pollMutation.isPending ? <Loader2 className="spin" size={15} /> : <Wifi size={15} />}
+          轮询完成
+        </button>
+        <button className="secondary-button" disabled={(!registrationID && !clientProfileID && !visibleResult?.registration) || busy} onClick={() => persistMutation.mutate()}>
+          {persistMutation.isPending ? <Loader2 className="spin" size={15} /> : <Save size={15} />}
+          保存登录态
+        </button>
+        <button className="secondary-button" disabled={(!effectiveAccountID && !effectiveVerificationRequestID) || busy} onClick={() => cleanupMutation.mutate()}>
+          {cleanupMutation.isPending ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
+          清理失败账号
+        </button>
+      </div>
+      {lastResult ? <pre className="json-box compact">{JSON.stringify(lastResult, null, 2)}</pre> : null}
+    </div>
+  );
+}
+
+function LoginStateCheckCard({ account, profiles, notify }: { account: WAAccount; profiles: ClientProfile[]; notify: (kind: Toast['kind'], message: string) => void }) {
+  const accountId = accountID(account);
+  const [result, setResult] = useState<WorkflowResponse | null>(null);
+  const firstProfile = profiles.find((profile) => profile.client_profile_id);
+  const mutation = useMutation({
+    mutationFn: () => checkLoginState({
+      wa_account_id: accountId,
+      client_profile_id: firstProfile?.client_profile_id || '',
+      registered_identity_id: '',
+      remote_timeout_seconds: 30,
+    }),
+    onSuccess: (response) => {
+      setResult(response);
+      notify(response.success === false || response.error_message ? 'error' : 'success', response.error_message || '登录状态检查完成');
+    },
+    onError: (error) => notify('error', errorMessage(error)),
+  });
+  return (
+    <InfoCard title="登录状态" icon={<Wifi size={17} />}>
+      <div className="service-card">
+        <p><strong>账号：</strong>{accountId}</p>
+        <p><strong>Profile：</strong>{firstProfile?.client_profile_id || '-'}</p>
+      </div>
+      <button className="secondary-button" disabled={mutation.isPending || !accountId} onClick={() => mutation.mutate()}>
+        {mutation.isPending ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+        检查登录状态
+      </button>
+      {result ? <pre className="json-box compact">{JSON.stringify(result, null, 2)}</pre> : null}
     </InfoCard>
   );
 }
@@ -1276,6 +1411,14 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
               {otpMutation.isPending ? <Loader2 className="spin" size={15} /> : <KeyRound size={15} />}
               提交 OTP
             </button>
+            <RegistrationRecoveryPanel
+              accountIDValue={pendingAccountID}
+              verificationRequestID={pendingVerificationRequestID}
+              result={probe}
+              notify={notify}
+              onChanged={onChanged}
+              onDebug={(exchange) => appendDebugExchange(setDebugExchanges, exchange)}
+            />
           </div>
         </InfoCard>
       </div>
@@ -2251,6 +2394,47 @@ function resolvePhoneInput(phone: string, countryCallingCode: string): PhoneInpu
 function requirePhone(input: PhoneInput | null) {
   if (!input) throw new Error('请输入手机号和国家拨号码');
   return input;
+}
+
+function requireValue(value: string, label: string) {
+  if (!value.trim()) throw new Error(`${label} is required`);
+  return value.trim();
+}
+
+function workflowText(result: WorkflowResponse | null | undefined, key: keyof WorkflowResponse) {
+  const value = result?.[key];
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function nestedText(result: WorkflowResponse | null | undefined, objectKey: keyof WorkflowResponse, field: string) {
+  const value = result?.[objectKey];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  const nested = (value as Record<string, unknown>)[field];
+  return typeof nested === 'string' ? nested.trim() : '';
+}
+
+function isAccountTransferWaiting(result?: WorkflowResponse | null) {
+  const phase = workflowText(result, 'registration_phase').toLowerCase();
+  const status = workflowText(result, 'status').toLowerCase();
+  return phase.includes('account_transfer') || status.includes('account_transfer') || Boolean(result?.account_transfer_challenge);
+}
+
+function challengeSummary(result?: WorkflowResponse | null) {
+  const challenge = result?.account_transfer_challenge;
+  if (!challenge || typeof challenge !== 'object' || Array.isArray(challenge)) return '';
+  const record = challenge as Record<string, unknown>;
+  return [
+    textFromRecord(record, 'type') || textFromRecord(record, 'challenge_type'),
+    textFromRecord(record, 'status'),
+    textFromRecord(record, 'expires_at') || textFromRecord(record, 'expiry_time'),
+  ].filter(Boolean).join(' / ');
+}
+
+function textFromRecord(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return '';
 }
 
 type LongConnectionRecord = Record<string, unknown>;

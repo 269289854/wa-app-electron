@@ -117,7 +117,7 @@ describe('registration recovery actions', () => {
     expect(request).toHaveBeenCalledWith({
       path: '/api/wa/actions/registration/account-transfer/poll',
       method: 'POST',
-      timeoutMs: 70000,
+      timeoutMs: 130000,
       body: {
         verification_request_id: 'wavrf_1',
         wa_account_id: 'waacc_1',

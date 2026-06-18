@@ -167,7 +167,7 @@ export function pollAccountTransferRegistration(verificationRequestID: string, a
       wa_account_id: accountIDValue,
       max_attempts: maxAttempts,
     },
-    timeoutMs: 70000,
+    timeoutMs: 130000,
   });
 }
 
