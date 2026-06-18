@@ -143,6 +143,12 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' || req.method === 'DELETE') {
     const body = await readBody(req);
     operations.push({ method: req.method, path, body });
+    if (path === '/api/wa/login-state-check') return json(res, {
+      success: true,
+      status: 'LOGIN_STATE_CHECK_STATUS_ACTIVE',
+      check: { status: 'LOGIN_STATE_CHECK_STATUS_ACTIVE' },
+      login_state: { status: 'LOGIN_STATE_STATUS_ACTIVE', wa_account_id: accountID, client_profile_id: 'profile-1' },
+    });
     if (path === '/api/wa/phone/sms-probe') return json(res, {
       success: true,
       passed: true,
@@ -150,7 +156,19 @@ const server = http.createServer(async (req, res) => {
       method_statuses: [{ method: 'sms', available: true }],
       phone_status: { sms_available: true },
     });
-    if (path === '/api/wa/register') return json(res, { success: true, status: 'otp_required', wa_account_id: body.e164_number === '+573145865572' ? platformAccountID : accountID, verification_request_id: verificationRequestID, delivery_method: body.delivery_method || 'sms' });
+    if (path === '/api/wa/register') {
+      if (body.e164_number === '+573145865572') return json(res, { success: true, status: 'otp_required', wa_account_id: platformAccountID, verification_request_id: verificationRequestID, delivery_method: body.delivery_method || 'sms' });
+      return json(res, {
+        success: true,
+        status: 'otp_required',
+        registration_phase: 'ACCOUNT_TRANSFER_WAITING',
+        wa_account_id: accountID,
+        verification_request_id: verificationRequestID,
+        delivery_method: body.delivery_method || 'sms',
+        account_transfer_challenge: { type: 'old_device', status: 'waiting', expires_at: '2026-06-12T00:30:00Z' },
+        registration: { registration_id: 'wareg-smoke-1', wa_account_id: accountID },
+      });
+    }
     if (path === '/api/wa/actions/registration/resume-otp') {
       if (body.wa_account_id === platformAccountID) {
         platformOtpSubmitCount += 1;
@@ -162,6 +180,23 @@ const server = http.createServer(async (req, res) => {
       }
       return json(res, { success: true, status: 'registered', wa_account_id: body.wa_account_id || accountID });
     }
+    if (path === '/api/wa/actions/registration/account-transfer/refresh') return json(res, {
+      success: true,
+      registration_phase: 'ACCOUNT_TRANSFER_WAITING',
+      verification_request_id: body.verification_request_id,
+      account_transfer_challenge: { type: 'old_device', status: 'refreshed', expires_at: '2026-06-12T00:45:00Z' },
+    });
+    if (path === '/api/wa/actions/registration/account-transfer/poll') return json(res, {
+      success: true,
+      status: 'registered',
+      registration_phase: 'REGISTERED',
+      wa_account_id: body.wa_account_id || accountID,
+      verification_request_id: body.verification_request_id,
+      registration: { registration_id: 'wareg-smoke-1', wa_account_id: body.wa_account_id || accountID },
+      login_state: { status: 'LOGIN_STATE_STATUS_ACTIVE', client_profile_id: 'profile-1' },
+    });
+    if (path === '/api/wa/actions/registration/cleanup-failed-account') return json(res, { success: true, deleted: true, wa_account_id: body.wa_account_id || pendingAccountID });
+    if (path === '/api/wa/actions/registration/persist-login-state') return json(res, { success: true, status: 'LOGIN_STATE_STATUS_ACTIVE', login_state: { client_profile_id: body.client_profile_id || 'profile-1' } });
     if (path === '/api/wa/messages/send') return json(res, { success: true, message_id: 'msg-sent' });
     return json(res, { success: true, operation: { status: 'ok' } });
   }
@@ -492,6 +527,19 @@ async function main() {
     `);
     await waitForOperation('/api/wa/account-settings/email/otp/request');
     await waitForOperation('/api/wa/account-settings/email/otp/verify');
+    const operationsBeforeLoginCheck = (await getOperations()).length;
+    await runInPage(client, `
+      const accountPage = [...document.querySelectorAll('.app-shell[data-view=account] .account-page')].find((page) => page.offsetParent !== null);
+      const card = [...accountPage.querySelectorAll('.info-card')].find((item) => item.innerText.includes('\u767b\u5f55\u72b6\u6001'));
+      if (!card) throw new Error('Login state card not found');
+      const button = [...card.querySelectorAll('button')].find((item) => item.innerText.includes('\u68c0\u67e5\u767b\u5f55\u72b6\u6001'));
+      if (!button || button.disabled) throw new Error('Login state check button is not ready');
+      button.click();
+      return true;
+    `);
+    const loginCheck = await waitForOperation('/api/wa/login-state-check', 'POST', 15000, operationsBeforeLoginCheck);
+    if (loginCheck.body.wa_account_id !== 'wa-account-1' || loginCheck.body.client_profile_id !== 'profile-1') throw new Error('Login state check payload was not recorded');
+    checks.loginStateCheck = true;
     checks.accountPage = true;
     checks.accountActions = true;
     await route(client, '#/add', 'Boolean(document.querySelector(".app-shell[data-view=add] .add-page"))');
@@ -513,6 +561,32 @@ async function main() {
     `);
     await waitForOperationWithDebug(client, '/api/wa/phone/sms-probe');
     await waitForOperationWithDebug(client, '/api/wa/register');
+    checks.accountTransferRecovery = await runInPage(client, `
+      const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
+      for (let index = 0; index < 40 && !addPage.innerText.includes('\u8d26\u53f7\u8fc1\u79fb\u7b49\u5f85\u4e2d'); index += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      if (!addPage.innerText.includes('\u8d26\u53f7\u8fc1\u79fb\u7b49\u5f85\u4e2d')) throw new Error('Account transfer waiting banner is not visible');
+      const recovery = [...addPage.querySelectorAll('.recovery-panel')].find((panel) => panel.offsetParent !== null);
+      if (!recovery) throw new Error('Registration recovery panel is not visible');
+      const clickButton = async (label) => {
+        let button = [...recovery.querySelectorAll('button')].find((item) => item.innerText.includes(label));
+        for (let index = 0; index < 30 && button?.disabled; index += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          button = [...recovery.querySelectorAll('button')].find((item) => item.innerText.includes(label));
+        }
+        if (!button || button.disabled) throw new Error(label + ' recovery button is not ready');
+        button.click();
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      };
+      await clickButton('\u5237\u65b0\u6311\u6218');
+      await clickButton('\u8f6e\u8be2\u5b8c\u6210');
+      await clickButton('\u6e05\u7406\u5931\u8d25\u8d26\u53f7');
+      return true;
+    `, 30000);
+    await waitForOperation('/api/wa/actions/registration/account-transfer/refresh');
+    await waitForOperation('/api/wa/actions/registration/account-transfer/poll');
+    await waitForOperation('/api/wa/actions/registration/cleanup-failed-account');
     const operationsBeforeRegistrationOtp = (await getOperations()).length;
     await runInPage(client, `
       const setValue = (input, value) => {
