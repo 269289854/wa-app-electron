@@ -6,7 +6,7 @@ WA App 的 Electron + React + Vite + TypeScript 全平台桌面客户端。
 
 - 默认连接远程服务 `https://wa.yizhimeng.uk`，访问密码只通过本机设置或运行时环境变量提供，不写入源码、README 或提交历史。
 - Electron 主进程提供 preload 安全桥，renderer 只通过 `window.waConfig`、`window.waApi`、`window.waService` 调用桌面能力和 `/api/wa/...`。
-- 支持账号列表、账号删除、长连接状态、client profile/设备指纹、注册探测、注册 OTP、联系人、消息、发送文本消息、标记已读、删除消息、联系人删除、联系人自动解析、资料名称、头像上传裁剪、头像移除、2FA PIN、邮箱设置、邮箱 OTP 和远程连接配置。
+- 支持账号列表、账号删除、长连接状态、client profile/设备指纹、注册探测、注册 OTP、账号迁移挑战刷新/轮询、登录状态检查、失败注册清理、联系人、消息、发送文本消息、标记已读、删除消息、联系人删除、联系人自动解析、资料名称、头像上传裁剪、头像移除、2FA PIN、邮箱设置、邮箱 OTP 和远程连接配置。
 - 内置本地 `wa-app-service` 模式：Windows 后端二进制放在 `resources/wa-app-service/win-x64/` 和 `resources/wa-app-service/win-ia32/`，客户端会按当前架构启动，数据目录默认为 Electron `userData/wa-app-data`。
 - Windows/macOS/Linux 打包配置已在 `electron-builder` 中准备：Windows `nsis/zip`，macOS `dmg/zip`，Linux `AppImage/deb`。
 
@@ -30,6 +30,26 @@ npx electron-builder --dir
 ```
 
 生产构建使用相对资源路径，打包后的 `file://` 页面不依赖 Vite dev server。
+
+## 迁移对账
+
+已从 `wa-app` dashboard 迁移到桌面端：
+
+- 账号管理：账号列表、分页、搜索、删除、账号详情、长连接状态、client profile 和设备指纹。
+- 注册链路：号码探测、通道选择、注册请求、OTP 提交、账号迁移挑战刷新/轮询、登录态持久化入口、失败待注册账号清理。
+- 联系人与消息：联系人列表、联系人自动解析、聊天线程、发送文本、标记已读、删除本地消息、删除联系人和 OTP 历史。
+- 账号设置：资料名、头像上传裁剪、头像移除、2FA PIN、邮箱设置、邮箱 OTP 请求/校验、手动登录状态检查。
+
+桌面端新增能力：
+
+- 本地/远程服务模式切换、本地 `wa-app-service` 启停、密码本机加密保存。
+- SMSBower/Hero-SMS 接码平台注册、OpenAI 手机号占用检查、接码订单取消队列。
+- 打包后 `file://` smoke、mock UI smoke 和远程 API smoke。
+
+已知暂不迁移：
+
+- 换绑手机号/Change Number：原 dashboard 组件也标注后端链路未接入，本轮不实现。
+- 原 webui 的 shadcn/router 文件结构：桌面端保留现有 Electron + HashRouter 架构，只迁移能力和行为。
 
 ## 远程验收
 
@@ -78,7 +98,20 @@ Remove-Item Env:\WA_APP_ELECTRON_SMOKE_PASSWORD -ErrorAction SilentlyContinue
 - renderer 内部调用 `window.waConfig.testConnection()` 能通过远程健康检查。
 - DevTools 没有在生产窗口中打开。
 
-`npm run smoke:mock-ui` 会启动一个本地 mock `/api/wa/...` 服务，并用打包后的 Electron 连接它，验证有账号数据时账号栏、联系人列表、聊天线程、账号详情、OTP、长连接和设置页都能渲染；同时会实际触发发送消息、注册探测、发起注册、提交注册 OTP、修改资料名称、2FA PIN、邮箱设置和邮箱 OTP 请求/校验等按钮链路。这个测试不依赖线上账号数量。
+`npm run smoke:mock-ui` 会启动一个本地 mock `/api/wa/...` 服务，并用打包后的 Electron 连接它，验证有账号数据时账号栏、联系人列表、聊天线程、账号详情、OTP、长连接和设置页都能渲染；同时会实际触发发送消息、注册探测、发起注册、提交注册 OTP、账号迁移挑战刷新/轮询、登录状态检查、失败注册清理、修改资料名称、2FA PIN、邮箱设置和邮箱 OTP 请求/校验等按钮链路。这个测试不依赖线上账号数量。
+
+完整本地验收顺序：
+
+```powershell
+npm run lint
+npm run test
+npm run typecheck
+npm run build
+npx electron-builder --dir
+npm run smoke:mock-ui
+```
+
+远程 smoke 需要额外设置 `WA_APP_ELECTRON_SMOKE_PASSWORD`，否则只运行本地 mock smoke。
 
 ## 打包
 
