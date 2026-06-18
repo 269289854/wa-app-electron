@@ -151,6 +151,51 @@ export function checkLoginState(input: Record<string, unknown>) {
   return apiRequest<WorkflowResponse>('/api/wa/login-state-check', { method: 'POST', body: input, timeoutMs: 70000 });
 }
 
+export function refreshAccountTransferChallenge(verificationRequestID: string) {
+  return apiRequest<WorkflowResponse>('/api/wa/actions/registration/account-transfer/refresh', {
+    method: 'POST',
+    body: { verification_request_id: verificationRequestID },
+    timeoutMs: 70000,
+  });
+}
+
+export function pollAccountTransferRegistration(verificationRequestID: string, accountIDValue = '', maxAttempts = 1) {
+  return apiRequest<WorkflowResponse>('/api/wa/actions/registration/account-transfer/poll', {
+    method: 'POST',
+    body: {
+      verification_request_id: verificationRequestID,
+      wa_account_id: accountIDValue,
+      max_attempts: maxAttempts,
+    },
+    timeoutMs: 70000,
+  });
+}
+
+export function cleanupFailedRegistration(input: { accountID?: string; verificationRequestID?: string; registration?: unknown; verificationRequest?: unknown } = {}) {
+  const body: Record<string, unknown> = {};
+  if (input.accountID) body.wa_account_id = input.accountID;
+  if (input.verificationRequestID) body.verification_request_id = input.verificationRequestID;
+  if (input.registration) body.registration = input.registration;
+  if (input.verificationRequest) body.verification_request = input.verificationRequest;
+  return apiRequest<WorkflowResponse>('/api/wa/actions/registration/cleanup-failed-account', {
+    method: 'POST',
+    body,
+    timeoutMs: 70000,
+  });
+}
+
+export function persistLoginState(input: { registrationID?: string; clientProfileID?: string; registration?: unknown }) {
+  const body: Record<string, unknown> = {};
+  if (input.registrationID) body.registration_id = input.registrationID;
+  if (input.clientProfileID) body.client_profile_id = input.clientProfileID;
+  if (input.registration) body.registration = input.registration;
+  return apiRequest<WorkflowResponse>('/api/wa/actions/registration/persist-login-state', {
+    method: 'POST',
+    body,
+    timeoutMs: 70000,
+  });
+}
+
 export function getTwoFactorStatus(accountID: string, remoteRefresh = true) {
   const params = new URLSearchParams({ wa_account_id: accountID });
   if (remoteRefresh) params.set('remote_refresh', 'true');

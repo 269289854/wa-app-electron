@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isTransientOTPSubmitError, messageText, normalizeTwoFactorStatus, submitRegistrationOTP } from './api';
+import {
+  cleanupFailedRegistration,
+  isTransientOTPSubmitError,
+  messageText,
+  normalizeTwoFactorStatus,
+  persistLoginState,
+  pollAccountTransferRegistration,
+  refreshAccountTransferChallenge,
+  submitRegistrationOTP,
+} from './api';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -75,6 +84,82 @@ describe('submitRegistrationOTP', () => {
         wa_account_id: 'waacc_1',
         verification_request_id: 'wavrf_1',
         otp: '123456',
+      },
+    });
+  });
+});
+
+describe('registration recovery actions', () => {
+  it('refreshes an account transfer challenge', async () => {
+    const request = vi.fn().mockResolvedValue({ success: true });
+    vi.stubGlobal('window', {
+      waApi: { request },
+    });
+
+    await refreshAccountTransferChallenge('wavrf_1');
+
+    expect(request).toHaveBeenCalledWith({
+      path: '/api/wa/actions/registration/account-transfer/refresh',
+      method: 'POST',
+      timeoutMs: 70000,
+      body: { verification_request_id: 'wavrf_1' },
+    });
+  });
+
+  it('polls an account transfer registration with account context', async () => {
+    const request = vi.fn().mockResolvedValue({ success: true });
+    vi.stubGlobal('window', {
+      waApi: { request },
+    });
+
+    await pollAccountTransferRegistration('wavrf_1', 'waacc_1', 5);
+
+    expect(request).toHaveBeenCalledWith({
+      path: '/api/wa/actions/registration/account-transfer/poll',
+      method: 'POST',
+      timeoutMs: 70000,
+      body: {
+        verification_request_id: 'wavrf_1',
+        wa_account_id: 'waacc_1',
+        max_attempts: 5,
+      },
+    });
+  });
+
+  it('cleans up failed registration attempts without undefined payload fields', async () => {
+    const request = vi.fn().mockResolvedValue({ success: true });
+    vi.stubGlobal('window', {
+      waApi: { request },
+    });
+
+    await cleanupFailedRegistration({ accountID: 'waacc_1', verificationRequestID: 'wavrf_1' });
+
+    expect(request).toHaveBeenCalledWith({
+      path: '/api/wa/actions/registration/cleanup-failed-account',
+      method: 'POST',
+      timeoutMs: 70000,
+      body: {
+        wa_account_id: 'waacc_1',
+        verification_request_id: 'wavrf_1',
+      },
+    });
+  });
+
+  it('persists a login state by registration id or client profile id', async () => {
+    const request = vi.fn().mockResolvedValue({ success: true });
+    vi.stubGlobal('window', {
+      waApi: { request },
+    });
+
+    await persistLoginState({ registrationID: 'wareg_1', clientProfileID: 'wacp_1' });
+
+    expect(request).toHaveBeenCalledWith({
+      path: '/api/wa/actions/registration/persist-login-state',
+      method: 'POST',
+      timeoutMs: 70000,
+      body: {
+        registration_id: 'wareg_1',
+        client_profile_id: 'wacp_1',
       },
     });
   });
