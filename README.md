@@ -33,6 +33,8 @@ npx electron-builder --dir
 
 ## 迁移对账
 
+详细的源项目同步点、功能矩阵、暂不迁移项和后续继续搬迁流程记录在 [MIGRATION_PARITY.md](MIGRATION_PARITY.md)。
+
 已从 `wa-app` dashboard 迁移到桌面端：
 
 - 账号管理：账号列表、分页、搜索、删除、账号详情、长连接状态、client profile 和设备指纹。
