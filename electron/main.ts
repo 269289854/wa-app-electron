@@ -98,6 +98,13 @@ const openAIPhoneTasks = new Map<string, {
   timer: NodeJS.Timeout;
 }>();
 const electronDir = dirname(fileURLToPath(import.meta.url));
+const appRoot = app.isPackaged ? process.resourcesPath : app.getAppPath();
+
+function appIconPath() {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'resources', 'brand', process.platform === 'win32' ? 'icon.ico' : 'app-icon.png')
+    : join(appRoot, 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+}
 
 function configPath() {
   return join(app.getPath('userData'), 'config.json');
@@ -580,6 +587,7 @@ function createWindow() {
     minWidth: 1060,
     minHeight: 680,
     title: 'WA App',
+    icon: appIconPath(),
     backgroundColor: '#f7f8fb',
     webPreferences: {
       preload: join(electronDir, 'preload.js'),

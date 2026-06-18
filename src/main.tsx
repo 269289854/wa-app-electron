@@ -69,6 +69,8 @@ import { probeStatus, registrationMethods, statusReason } from './result-model';
 import { normalizeOpenAIPhoneCheckResult } from './openai-phone-check';
 import { countryDisplayName, filterSMSBowerCountries, normalizeSMSBowerCountries, type SMSBowerCountry } from './smsbower-countries';
 import type { AccountMessage, ClientProfile, WAAccount, WorkflowResponse } from './types';
+import appIconUrl from './assets/app-icon.png';
+import launchSplashUrl from './assets/launch-splash.png';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -170,11 +172,13 @@ function DesktopApp() {
     void queryClient.invalidateQueries({ queryKey: ['accounts'] });
   }, []);
 
+  if (configQuery.isLoading) return <LaunchScreen />;
+
   return (
     <div className="app-shell" data-view={view}>
       <aside className="account-rail">
         <div className="brand-block">
-          <div className="brand-mark">WA</div>
+          <img className="brand-mark" src={appIconUrl} alt="" aria-hidden="true" />
           <div>
             <strong>WA App</strong>
             <span>桌面客户端</span>
@@ -281,6 +285,20 @@ function DesktopApp() {
       </main>
       <ToastStack toasts={toasts} />
     </div>
+  );
+}
+
+function LaunchScreen() {
+  return (
+    <main className="launch-screen" style={{ backgroundImage: `url(${launchSplashUrl})` }}>
+      <section className="launch-panel" aria-live="polite">
+        <img src={appIconUrl} alt="" aria-hidden="true" />
+        <div>
+          <strong>WA App</strong>
+          <span><Loader2 className="spin" size={16} />加载中</span>
+        </div>
+      </section>
+    </main>
   );
 }
 

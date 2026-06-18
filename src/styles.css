@@ -36,9 +36,61 @@ button { cursor: pointer; }
   width: 44px;
   height: 44px;
   border-radius: 8px;
-  background: #16a34a;
-  color: white;
-  font-weight: 800;
+  background: #e7fff8;
+  object-fit: cover;
+  box-shadow: 0 6px 16px rgba(22, 163, 74, 0.14);
+}
+
+.launch-screen {
+  display: grid;
+  place-items: center start;
+  min-width: 1060px;
+  min-height: 680px;
+  height: 100vh;
+  padding: 0 0 0 13vw;
+  overflow: hidden;
+  background-color: #eefdf8;
+  background-position: center;
+  background-size: cover;
+}
+
+.launch-panel {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 260px;
+  border: 1px solid rgba(159, 224, 213, 0.72);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.74);
+  padding: 14px 16px;
+  box-shadow: 0 18px 50px rgba(28, 108, 102, 0.13);
+  backdrop-filter: blur(10px);
+}
+
+.launch-panel img {
+  width: 54px;
+  height: 54px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.launch-panel strong,
+.launch-panel span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.launch-panel strong {
+  color: #173e44;
+  font-size: 18px;
+}
+
+.launch-panel span {
+  margin-top: 4px;
+  color: #507077;
+  font-size: 13px;
+  font-weight: 650;
 }
 
 .rail-action, .primary-button, .secondary-button, .danger-button {

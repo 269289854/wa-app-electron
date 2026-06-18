@@ -1,6 +1,6 @@
 {
   "name": "wa-app-electron",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Cross-platform desktop client for wa-app.",
   "type": "module",
@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:5173 && npm run electron:dev\"",
     "build:electron": "tsc -p electron/tsconfig.json",
+    "assets:brand": "powershell -ExecutionPolicy Bypass -File scripts/generate-brand-assets.ps1",
     "electron:dev": "npm run build:electron && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
     "lint": "eslint .",
     "test": "vitest run",
@@ -70,6 +71,7 @@
       }
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis",
         "zip"
@@ -88,6 +90,7 @@
       "deleteAppDataOnUninstall": false
     },
     "mac": {
+      "icon": "build/icon.png",
       "target": [
         "dmg",
         "zip"
@@ -95,6 +98,7 @@
       "category": "public.app-category.productivity"
     },
     "linux": {
+      "icon": "build/icon.png",
       "target": [
         "AppImage",
         "deb"
