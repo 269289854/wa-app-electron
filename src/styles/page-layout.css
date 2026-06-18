@@ -1,0 +1,45 @@
+.account-page, .add-page, .settings-page, .cancel-queue-page { min-height: 0; overflow-y: auto; padding: 22px; }
+.account-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid #dde1e7;
+  padding-bottom: 18px;
+  margin-bottom: 18px;
+}
+.account-hero h1, .section-title h1 { margin: 0; font-size: 24px; }
+.account-hero p, .section-title p { margin: 5px 0 8px; color: #687382; }
+.dashboard-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.two-column { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.info-card {
+  border: 1px solid #dde3ea;
+  border-radius: 8px;
+  background: #fff;
+  padding: 16px;
+}
+.info-card header { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.info-card h2 { margin: 0; font-size: 15px; }
+.form-grid { display: grid; gap: 12px; }
+.form-grid.two { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
+.form-grid label, .form-field { display: grid; gap: 6px; color: #4b5563; font-size: 13px; font-weight: 650; }
+.info-grid { display: grid; gap: 10px; margin: 0; }
+.info-grid div {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+}
+.info-grid dt { color: #687382; font-size: 12px; font-weight: 650; }
+.info-grid dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #26313f;
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+}
+.field-hint { color: #687382; font-size: 12px; font-weight: 500; }
+.check-row { display: flex !important; grid-template-columns: auto 1fr; align-items: center; color: #293443 !important; font-weight: 500 !important; }

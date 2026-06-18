@@ -1,0 +1,4 @@
+@media (max-width: 1180px) {
+  .dashboard-grid, .two-column { grid-template-columns: 1fr; }
+  .chat-layout { grid-template-columns: 330px minmax(0, 1fr); }
+}

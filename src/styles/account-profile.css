@@ -1,0 +1,49 @@
+.mini-list { display: grid; gap: 8px; }
+.mini-list div { border: 1px solid #edf0f4; border-radius: 8px; padding: 9px; }
+.mini-list strong, .mini-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini-list small { color: #687382; margin-top: 3px; }
+.profile-list { display: grid; gap: 12px; }
+.profile-block {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+}
+.profile-block header { display: flex; justify-content: space-between; align-items: start; gap: 12px; margin: 0; }
+.profile-block strong, .profile-block small { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-block small, .profile-meta { color: #687382; }
+.profile-status {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  background: #eef2f6;
+  color: #475569;
+}
+.profile-status.ok { background: #dcfce7; color: #166534; }
+.profile-status.warn { background: #fffbeb; color: #92400e; }
+.profile-status.bad { background: #fee2e2; color: #991b1b; }
+.fingerprint-grid { display: grid; gap: 8px; margin: 0; }
+.fingerprint-grid div { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.fingerprint-grid dt { color: #687382; font-size: 12px; font-weight: 650; }
+.fingerprint-grid dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #26313f; font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace; font-size: 12px; }
+
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dff5e8;
+  color: #137a43;
+  font-size: 12px;
+  font-weight: 800;
+  flex: 0 0 auto;
+}
+.avatar.large { width: 72px; height: 72px; font-size: 18px; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+.avatar.ghost { background: #eef2f6; color: #687382; }
