@@ -69,8 +69,10 @@ import { probeStatus, registrationMethods, statusReason } from './result-model';
 import { normalizeOpenAIPhoneCheckResult } from './openai-phone-check';
 import { countryDisplayName, filterSMSBowerCountries, normalizeSMSBowerCountries, type SMSBowerCountry } from './smsbower-countries';
 import type { AccountMessage, ClientProfile, WAAccount, WorkflowResponse } from './types';
-import appIconUrl from './assets/app-icon.png';
-import launchSplashUrl from './assets/launch-splash.png';
+import appIconUrl from './assets/figma-prototype-used/app-icon-clean.png';
+import assistantHeroUrl from './assets/figma-prototype-used/assistant-hero-scene.png';
+import assistantPortraitUrl from './assets/figma-prototype-used/assistant-portrait.png';
+import assistantMascotUrl from './assets/figma-prototype-used/assistant-mini-mascot.png';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -176,6 +178,7 @@ function DesktopApp() {
 
   return (
     <div className="app-shell" data-view={view}>
+      <WindowChrome connected={connected} />
       <aside className="account-rail">
         <div className="brand-block">
           <img className="brand-mark" src={appIconUrl} alt="" aria-hidden="true" />
@@ -228,13 +231,18 @@ function DesktopApp() {
             设置
           </button>
         </nav>
+        <div className="rail-footer">
+          <img src={appIconUrl} alt="" aria-hidden="true" />
+          <span>WA App</span>
+        </div>
       </aside>
       <main className="workspace">
         <TopBar
+          view={view}
           connected={connected}
           config={configQuery.data}
           checking={connectionQuery.isFetching}
-          error={needsRemotePassword ? 'Set the access password in Settings first.' : connectionQuery.data?.error}
+          error={needsRemotePassword ? '请先在设置中保存访问密码。' : connectionQuery.data?.error}
           onRefresh={() => {
             void connectionQuery.refetch();
             if (apiReady) {
@@ -244,7 +252,9 @@ function DesktopApp() {
           }}
         />
         {!connected && view !== 'settings' ? (
-          <SettingsPanel notify={notify} compact={false} />
+          <div className="view-pane connection-fallback">
+            <SettingsPanel notify={notify} compact={false} />
+          </div>
         ) : (
           <>
             <div className="view-pane" hidden={view !== 'add'}>
@@ -281,6 +291,23 @@ function DesktopApp() {
   );
 }
 
+function WindowChrome({ connected }: { connected: boolean }) {
+  return (
+    <header className="window-chrome">
+      <div className="window-title">
+        <img src={appIconUrl} alt="" aria-hidden="true" />
+        <span>WA App</span>
+      </div>
+      <span className={`chrome-status ${connected ? 'ok' : 'bad'}`}>{connected ? '服务在线' : '未连接'}</span>
+      <div className="window-controls" aria-hidden="true">
+        <span>-</span>
+        <span>□</span>
+        <span>×</span>
+      </div>
+    </header>
+  );
+}
+
 function PrimaryViewTabs({ view, onChange }: { view: View; onChange: (view: View) => void }) {
   const tabs: Array<{ view: View; label: string; icon: React.ReactNode }> = [
     { view: 'chats', label: '消息', icon: <MessageCircle size={15} /> },
@@ -311,7 +338,8 @@ function PrimaryViewTabs({ view, onChange }: { view: View; onChange: (view: View
 
 function LaunchScreen() {
   return (
-    <main className="launch-screen" style={{ backgroundImage: `url(${launchSplashUrl})` }}>
+    <main className="launch-screen">
+      <img className="launch-hero-image" src={assistantHeroUrl} alt="" aria-hidden="true" />
       <section className="launch-panel" aria-live="polite">
         <img src={appIconUrl} alt="" aria-hidden="true" />
         <div>
@@ -323,22 +351,45 @@ function LaunchScreen() {
   );
 }
 
-function TopBar({ connected, config, checking, error, onRefresh }: { connected: boolean; config?: ClientConfig; checking: boolean; error?: string; onRefresh: () => void }) {
+function TopBar({ view, connected, config, checking, error, onRefresh }: { view: View; connected: boolean; config?: ClientConfig; checking: boolean; error?: string; onRefresh: () => void }) {
+  const copy = pageCopy(view);
   return (
     <header className="top-bar">
-      <div className="status-group">
-        <span className={`status-pill ${connected ? 'ok' : 'bad'}`}>
-          {checking ? <Loader2 size={14} className="spin" /> : connected ? <Wifi size={14} /> : <WifiOff size={14} />}
-          {connected ? '服务在线' : '未连接'}
-        </span>
-        <span className="endpoint">{config?.mode === 'local' ? config.localBaseUrl || '本地服务' : config?.remoteBaseUrl}</span>
-        {error ? <span className="top-error">{error}</span> : null}
+      <div className="page-heading">
+        <h1>{copy.title}</h1>
+        <p>{copy.detail}</p>
       </div>
-      <button className="icon-button" title="刷新" onClick={onRefresh}>
-        <RefreshCw size={16} className={checking ? 'spin' : ''} />
-      </button>
+      <div className="top-actions">
+        <div className="assistant-badge">
+          <span>通讯助手待命</span>
+          <img src={assistantPortraitUrl} alt="" aria-hidden="true" />
+        </div>
+        <div className="status-group">
+          <span className={`status-pill ${connected ? 'ok' : 'bad'}`}>
+            {checking ? <Loader2 size={14} className="spin" /> : connected ? <Wifi size={14} /> : <WifiOff size={14} />}
+            {connected ? '服务在线' : '未连接'}
+          </span>
+          <span className="endpoint">{config?.mode === 'local' ? config.localBaseUrl || '本地服务' : config?.remoteBaseUrl}</span>
+          {error ? <span className="top-error">{error}</span> : null}
+        </div>
+        <button className="secondary-button refresh-button" title="刷新" onClick={onRefresh}>
+          <RefreshCw size={16} className={checking ? 'spin' : ''} />
+          刷新
+        </button>
+      </div>
     </header>
   );
+}
+
+function pageCopy(view: View) {
+  const copy: Record<View, { title: string; detail: string }> = {
+    chats: { title: '消息工作台', detail: '联系人、消息线程、账号在线状态集中处理。' },
+    account: { title: '账号详情', detail: '资料、安全、OTP、设备指纹与长连接状态。' },
+    add: { title: '添加账号', detail: '先探测号码，再选择可用通道发起注册并提交 OTP。' },
+    settings: { title: '连接与本地服务', detail: '远程服务、本地模式、SMSBower/Hero-SMS、OpenAI 手机号检查。' },
+    'cancel-queue': { title: '取消队列', detail: '接码订单到达可取消时间后自动取消，Hero-SMS 等待平台最短取消时间。' },
+  };
+  return copy[view];
 }
 
 function AccountRow({ account, active, connection, connectionLoading, avatarVersion, onClick }: { account: WAAccount; active: boolean; connection?: LongConnectionRecord; connectionLoading: boolean; avatarVersion: string; onClick: () => void }) {
@@ -585,7 +636,7 @@ function AccountPanel({ account, avatarVersion, notify, onChanged, onAvatarChang
         <div>
           <h1>{accountTitle(account)}</h1>
           <p>{account.phone?.e164_number || accountId}</p>
-          <span className="status-pill ok"><Circle size={10} fill="currentColor" />{String(account.status || 'ACTIVE')}</span>
+          <span className={`status-pill ${isRegistrationPending(account) ? 'warn' : 'ok'}`}><Circle size={10} fill="currentColor" />{isRegistrationPending(account) ? '等待 OTP' : String(account.status || 'ACTIVE')}</span>
         </div>
         <button className="danger-button" onClick={() => window.confirm('确定删除该账号？') && deleteMutation.mutate()}>
           <Trash2 size={15} />
@@ -624,8 +675,9 @@ function ManualOtpCard({ account, notify, onChanged }: { account: WAAccount; not
     onError: (error) => notify('error', errorMessage(error)),
   });
   return (
-    <InfoCard title="提交注册 OTP" icon={<KeyRound size={17} />}>
-      <div className="form-grid two">
+    <InfoCard title="待 OTP 状态" icon={<KeyRound size={17} />}>
+      <StatusCallout tone="warn" title="等待 WhatsApp 注册验证码" detail="验证码可从联系人消息、接码平台或手动记录中获取。" />
+      <div className="form-grid two otp-submit-row">
         <label>
           验证码
           <input value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D+/g, '').slice(0, 8))} type="password" inputMode="numeric" autoComplete="one-time-code" />
@@ -1214,13 +1266,10 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
   }, [platformRegisterMutation, stopSMSBowerRegistrationTask]);
   return (
     <section className="add-page">
-      <div className="section-title">
-        <h1>添加 WAAccount</h1>
-        <p>先探测号码，再选择可用通道发起注册并提交 OTP。</p>
-      </div>
       <div className="two-column">
         <InfoCard title="号码与通道" icon={<Plus size={17} />}>
           <div className="form-grid">
+            <p className="card-intro">国家拨号码、手机号、注册通道、OpenAI 手机号检查结果。</p>
             <label>
               国家拨号码
               <input value={countryCallingCode} onChange={(event) => setCountryCallingCode(event.target.value)} placeholder="+1" disabled={addAccountBusy} />
@@ -1236,10 +1285,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
                 {registrationMethods.map((item) => <option value={item.code} key={item.code}>{item.label}</option>)}
               </select>
             </label>
-            <div className={`result-banner ${status.tone}`}>
-              <strong>{status.label}</strong>
-              <span>{statusReason(status) || '完成号码探测后会显示通道状态。'}</span>
-            </div>
+            <StatusCallout tone={status.tone} title={status.label} detail={statusReason(status) || '完成号码探测后会显示通道状态。'} />
             {status.methods.length ? (
               <div className="method-grid">
                 {status.methods.map((item) => (
@@ -1260,6 +1306,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
         </InfoCard>
         <InfoCard title="OTP" icon={<KeyRound size={17} />}>
           <div className="form-grid">
+            <p className="card-intro">提交 WhatsApp 注册验证码，支持保留 verification_request_id。</p>
             <label>
               待注册账号 ID
               <input value={pendingAccountID} onChange={(event) => setPendingAccountID(event.target.value)} placeholder="wa_account_id" disabled={addAccountBusy} />
@@ -1288,11 +1335,12 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
               <span>成功 {platformState.successes}/{smsConfig?.targetSuccessCount || 0}</span>
               <span>下单 {platformState.orders}/{smsConfig?.maxOrders || 0}</span>
             </div>
-            <div className={`result-banner ${platformBusy ? 'warn' : platformState.successes ? 'ok' : ''}`}>
-              <strong>{platformStageLabel(platformState.stage)}</strong>
-              <span>{platformState.message || `使用 ${platformName} 购买 WhatsApp 号码，自动探测、注册、等待验证码并提交 OTP。`}</span>
-              {platformState.currentPhone ? <span>{platformState.currentPhone} / {platformState.activationId}</span> : null}
-            </div>
+            <StatusCallout
+              tone={platformBusy ? 'warn' : platformState.successes ? 'ok' : 'idle'}
+              title={platformStageLabel(platformState.stage)}
+              detail={platformState.message || `使用 ${platformName} 购买 WhatsApp 号码，自动探测、注册、等待验证码并提交 OTP。`}
+              meta={platformState.currentPhone ? `${platformState.currentPhone} / ${platformState.activationId}` : ''}
+            />
             <div className="inline-actions">
               <button
                 className="primary-button"
@@ -1939,10 +1987,6 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
   });
   return (
     <section className="settings-page">
-      <div className="section-title">
-        <h1>连接与本地服务</h1>
-        <p>默认连接远程服务；本地模式已预留启动入口，检测到 wa-app-service 后即可使用。</p>
-      </div>
       <div className="two-column">
         <InfoCard title="连接配置" icon={<Settings size={17} />}>
           <div className="form-grid">
@@ -1960,7 +2004,7 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
             <label>
               访问密码
               <input value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} type="password" placeholder={configQuery.data?.hasPassword ? '已保存，留空不修改' : '请输入访问密码'} />
-              {configQuery.data?.authPasswordRef ? <span className="field-hint">Password saved in local secure storage</span> : null}
+              {configQuery.data?.authPasswordRef ? <span className="field-hint">密码已保存在本地安全存储。</span> : null}
             </label>
             <label>
               本地数据目录
@@ -2140,6 +2184,16 @@ function InfoCard({ title, icon, children }: { title: string; icon: React.ReactN
   );
 }
 
+function StatusCallout({ tone, title, detail, meta }: { tone?: string; title: string; detail: string; meta?: string }) {
+  return (
+    <div className={`result-banner ${tone || 'idle'}`}>
+      <strong>{title}</strong>
+      <span>{detail}</span>
+      {meta ? <span>{meta}</span> : null}
+    </div>
+  );
+}
+
 function ProfilesList({ profiles, loading }: { profiles: ClientProfile[]; loading: boolean }) {
   if (loading) return <InlineLoading text="加载设备指纹" />;
   if (!profiles.length) return <p className="muted">暂无客户端 profile。</p>;
@@ -2233,6 +2287,7 @@ function ToastStack({ toasts }: { toasts: Toast[] }) {
 function EmptyState({ icon, title, detail }: { icon: React.ReactNode; title: string; detail: string }) {
   return (
     <div className="empty-state">
+      <img src={assistantMascotUrl} alt="" aria-hidden="true" />
       <span>{icon}</span>
       <h2>{title}</h2>
       <p>{detail}</p>

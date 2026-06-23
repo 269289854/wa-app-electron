@@ -7,7 +7,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$unpackedDir = $Arch -eq "ia32" ? "win-ia32-unpacked" : "win-unpacked"
+$unpackedDir = if ($Arch -eq "ia32") { "win-ia32-unpacked" } else { "win-unpacked" }
 $exe = Join-Path $root "release\$unpackedDir\WA App.exe"
 if (!(Test-Path $exe)) {
   throw "Missing unpacked executable ($Arch). Run npx electron-builder --win nsis zip --$Arch first."
