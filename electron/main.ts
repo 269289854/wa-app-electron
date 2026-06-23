@@ -593,6 +593,7 @@ function createWindow() {
     y: state.y,
     minWidth: 1060,
     minHeight: 680,
+    frame: false,
     title: 'WA App',
     icon: appIconPath(),
     backgroundColor: '#f7f8fb',
@@ -631,6 +632,30 @@ function saveWindowState(window: BrowserWindow | null) {
   });
 }
 
+function focusedWindow() {
+  return BrowserWindow.getFocusedWindow() || mainWindow;
+}
+
+function minimizeFocusedWindow() {
+  focusedWindow()?.minimize();
+}
+
+function toggleMaximizeFocusedWindow() {
+  const window = focusedWindow();
+  if (!window) return false;
+  if (window.isMaximized()) window.unmaximize();
+  else window.maximize();
+  return window.isMaximized();
+}
+
+function closeFocusedWindow() {
+  focusedWindow()?.close();
+}
+
+function isFocusedWindowMaximized() {
+  return Boolean(focusedWindow()?.isMaximized());
+}
+
 app.whenReady().then(async () => {
   if (!gotSingleInstanceLock) return;
   configStore = await createConfigStore(configStorePath(), app.getPath('userData'));
@@ -651,6 +676,10 @@ app.whenReady().then(async () => {
     return publicConfig(next);
   });
   ipcMain.handle('wa-config:test', (_event, input?: ClientConfigPatch) => testConnection(input));
+  ipcMain.handle('window-control:minimize', () => minimizeFocusedWindow());
+  ipcMain.handle('window-control:toggle-maximize', () => toggleMaximizeFocusedWindow());
+  ipcMain.handle('window-control:close', () => closeFocusedWindow());
+  ipcMain.handle('window-control:is-maximized', () => isFocusedWindowMaximized());
   ipcMain.handle('wa-api:request', (_event, input: ApiRequestInput) => requestJSON(input));
   ipcMain.handle('wa-api:asset', (_event, path: string) => requestAsset(path));
   ipcMain.handle('openai-phone:bridge-status', () => startOpenAIPhoneBridge());

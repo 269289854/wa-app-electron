@@ -292,6 +292,31 @@ function DesktopApp() {
 }
 
 function WindowChrome({ connected }: { connected: boolean }) {
+  const [maximized, setMaximized] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    window.waDesktop.windowControl?.isMaximized()
+      .then((value) => {
+        if (!cancelled) setMaximized(Boolean(value));
+      })
+      .catch(() => {
+        if (!cancelled) setMaximized(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const minimizeWindow = () => {
+    void window.waDesktop.windowControl?.minimize();
+  };
+  const toggleMaximizeWindow = () => {
+    void window.waDesktop.windowControl?.toggleMaximize()
+      .then((value) => setMaximized(Boolean(value)))
+      .catch(() => setMaximized((value) => !value));
+  };
+  const closeWindow = () => {
+    void window.waDesktop.windowControl?.close();
+  };
   return (
     <header className="window-chrome">
       <div className="window-title">
@@ -299,10 +324,12 @@ function WindowChrome({ connected }: { connected: boolean }) {
         <span>WA App</span>
       </div>
       <span className={`chrome-status ${connected ? 'ok' : 'bad'}`}>{connected ? '服务在线' : '未连接'}</span>
-      <div className="window-controls" aria-hidden="true">
-        <span>-</span>
-        <span>□</span>
-        <span>×</span>
+      <div className="window-controls">
+        <button type="button" aria-label="最小化窗口" title="最小化" onClick={minimizeWindow}>-</button>
+        <button type="button" aria-label={maximized ? '还原窗口' : '最大化窗口'} title={maximized ? '还原' : '最大化'} onClick={toggleMaximizeWindow}>
+          {maximized ? '❐' : '□'}
+        </button>
+        <button type="button" aria-label="关闭窗口" title="关闭" onClick={closeWindow}>×</button>
       </div>
     </header>
   );

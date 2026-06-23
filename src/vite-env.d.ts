@@ -145,6 +145,13 @@ type SMSCancelQueueAPI = {
   remove(id: string): Promise<SMSCancelQueueItem>;
 };
 
+type WindowControlAPI = {
+  minimize(): Promise<void>;
+  toggleMaximize(): Promise<boolean>;
+  close(): Promise<void>;
+  isMaximized(): Promise<boolean>;
+};
+
 type OpenAIPhoneCheckInput = {
   requestId: string;
   phoneNumber: string;
@@ -183,6 +190,7 @@ interface Window {
     start(): Promise<ServiceStatus>;
     stop(): Promise<ServiceStatus>;
   };
+  windowControl?: WindowControlAPI;
   smsCancelQueue: SMSCancelQueueAPI;
   smsbower: SMSPlatformAPI;
   smsPlatform: SMSPlatformAPI;
@@ -205,6 +213,7 @@ interface Window {
       start(): Promise<ServiceStatus>;
       stop(): Promise<ServiceStatus>;
     };
+    windowControl: WindowControlAPI;
     smsPlatform: SMSPlatformAPI;
     smsCancelQueue: SMSCancelQueueAPI;
     smsbower: SMSPlatformAPI;

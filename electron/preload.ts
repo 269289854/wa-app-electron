@@ -47,6 +47,12 @@ const api = {
     set: (input: unknown) => ipcRenderer.invoke('wa-config:set', input),
     testConnection: (input?: unknown) => ipcRenderer.invoke('wa-config:test', input),
   },
+  windowControl: {
+    minimize: () => ipcRenderer.invoke('window-control:minimize'),
+    toggleMaximize: () => ipcRenderer.invoke('window-control:toggle-maximize'),
+    close: () => ipcRenderer.invoke('window-control:close'),
+    isMaximized: () => ipcRenderer.invoke('window-control:is-maximized'),
+  },
   waApi: {
     request: (input: unknown) => ipcRenderer.invoke('wa-api:request', input),
     fetchAsset: (path: string) => ipcRenderer.invoke('wa-api:asset', path),
