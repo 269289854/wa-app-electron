@@ -10,6 +10,15 @@ WA App 的 Electron + React + Vite + TypeScript 全平台桌面客户端。
 - 内置本地 `wa-app-service` 模式：Windows 后端二进制放在 `resources/wa-app-service/win-x64/` 和 `resources/wa-app-service/win-ia32/`，客户端会按当前架构启动，数据目录默认为 Electron `userData/wa-app-data`。
 - Windows/macOS/Linux 打包配置已在 `electron-builder` 中准备：Windows `nsis/zip`，macOS `dmg/zip`，Linux `AppImage/deb`。
 
+## 服务端同步锚点
+
+后续继续从服务端 `wa-app` 同步客户端功能时，先对比以下锚点之后的服务端提交：
+
+- 客户端当前功能补齐提交：`9e9c0b6ad0654f906c11cfa997e485b6b5bb38f9`（2026-06-26 13:52:51 +0800，`Align registration channel status display`）。
+- 客户端已合入的 `origin/main` 基线：`162ada9ddce3b573d63078b2aece62c75de6a885`（2026-06-18 16:52:50 +0800，`Release v1.0.2`）。
+- 本轮对齐参考的本地服务端 `D:\work\github work\wa-app` 提交：`e82002f7e0dc4f7f42bdfbc1045ff38a730d7140`（2026-06-26 11:58:30 +0800，`Merge branch 'main' of https://github.com/pood1e/wa-app`）。
+- 刷新时看到的服务端 `origin/main` 提交：`fdc4cd36dd77a1b5809e4d39bbda42251b3e6737`（2026-06-24 23:56:25 +0800，`Refresh README and align proxy/device-profile config vocabulary`）。
+
 ## 开发
 
 ```sh
