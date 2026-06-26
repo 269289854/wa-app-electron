@@ -7,6 +7,8 @@ export type ClientConfig = {
   remoteBaseUrl: string;
   localBaseUrl: string;
   localDataDir: string;
+  localCommonProxy: string;
+  localDeviceProfilesFile: string;
   autoStartLocalService: boolean;
   smsCancelQueuePollIntervalSeconds: number;
   smsProvider: SMSProvider;
@@ -72,6 +74,8 @@ export function defaultConfig(userDataDir: string): StoredConfig {
     remoteBaseUrl: defaultRemoteBaseUrl,
     localBaseUrl: '',
     localDataDir: join(userDataDir, 'wa-app-data'),
+    localCommonProxy: '',
+    localDeviceProfilesFile: '',
     autoStartLocalService: false,
     smsCancelQueuePollIntervalSeconds: 5,
     smsProvider: 'smsbower',
@@ -88,6 +92,8 @@ export function normalizeConfig(config: Partial<StoredConfig>, userDataDir: stri
     remoteBaseUrl,
     localBaseUrl,
     localDataDir: config.localDataDir || join(userDataDir, 'wa-app-data'),
+    localCommonProxy: String(config.localCommonProxy || '').trim(),
+    localDeviceProfilesFile: String(config.localDeviceProfilesFile || '').trim(),
     autoStartLocalService: Boolean(config.autoStartLocalService),
     smsCancelQueuePollIntervalSeconds: boundedNumber(config.smsCancelQueuePollIntervalSeconds, 1, 300, 5),
     smsProvider: normalizeSMSProvider(config.smsProvider),
@@ -150,6 +156,8 @@ export function publicConfig(config: StoredConfig): ClientConfig {
     remoteBaseUrl: config.remoteBaseUrl,
     localBaseUrl: config.localBaseUrl,
     localDataDir: config.localDataDir,
+    localCommonProxy: config.localCommonProxy,
+    localDeviceProfilesFile: config.localDeviceProfilesFile,
     autoStartLocalService: config.autoStartLocalService,
     smsCancelQueuePollIntervalSeconds: config.smsCancelQueuePollIntervalSeconds,
     smsProvider: config.smsProvider,

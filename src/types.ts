@@ -104,6 +104,7 @@ export type WorkflowResponse = {
   success?: boolean;
   passed?: boolean;
   request_failed?: boolean;
+  retry_after_seconds?: number;
   status?: string;
   error_message?: string;
   reject_reason?: string;
@@ -121,6 +122,7 @@ export type WorkflowResponse = {
   phone?: Record<string, unknown>;
   proxy?: Record<string, unknown>;
   verification_request?: Record<string, unknown>;
+  account_transfer_challenge?: Record<string, unknown>;
   registration?: Record<string, unknown>;
   login_state?: Record<string, unknown>;
   check?: Record<string, unknown>;

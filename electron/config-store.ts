@@ -50,6 +50,8 @@ export class ConfigStore {
     if (values.has('remoteBaseUrl')) partial.remoteBaseUrl = values.get('remoteBaseUrl');
     if (values.has('localBaseUrl')) partial.localBaseUrl = values.get('localBaseUrl');
     if (values.has('localDataDir')) partial.localDataDir = values.get('localDataDir');
+    if (values.has('localCommonProxy')) partial.localCommonProxy = values.get('localCommonProxy');
+    if (values.has('localDeviceProfilesFile')) partial.localDeviceProfilesFile = values.get('localDeviceProfilesFile');
     if (values.has('autoStartLocalService')) partial.autoStartLocalService = values.get('autoStartLocalService') === '1';
     if (values.has('smsCancelQueuePollIntervalSeconds')) {
       partial.smsCancelQueuePollIntervalSeconds = Number(values.get('smsCancelQueuePollIntervalSeconds'));
@@ -79,6 +81,8 @@ export class ConfigStore {
       this.upsert('remoteBaseUrl', n.remoteBaseUrl, now);
       this.upsert('localBaseUrl', n.localBaseUrl, now);
       this.upsert('localDataDir', n.localDataDir, now);
+      this.upsert('localCommonProxy', n.localCommonProxy, now);
+      this.upsert('localDeviceProfilesFile', n.localDeviceProfilesFile, now);
       this.upsert('autoStartLocalService', n.autoStartLocalService ? '1' : '0', now);
       this.upsert('smsCancelQueuePollIntervalSeconds', String(n.smsCancelQueuePollIntervalSeconds), now);
       this.upsert('smsProvider', n.smsProvider, now);

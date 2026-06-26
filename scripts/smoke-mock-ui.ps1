@@ -128,12 +128,12 @@ const server = http.createServer(async (req, res) => {
     ],
   });
   if (path === '/api/wa/account-otp-messages') return json(res, {
-    otp_messages: [{ account_message_id: 'otp-1', display_text: '123456', received_at: '2026-06-12T00:03:00Z' }],
+    otp_messages: [{ account_message_id: 'otp-1', display_text: '123456', otp: { value: '123456' }, received_at: '2026-06-12T00:03:00Z', expires_at: '2099-06-12T00:13:00Z' }],
   });
   if (path === '/api/wa/long-connections') return json(res, {
     states: [
       { wa_account_id: accountID, status: 'connected', connected: true },
-      { wa_account_id: pendingAccountID, status: 'starting', connected: false },
+      { wa_account_id: pendingAccountID, status: 'LONG_CONNECTION_STATUS_STOPPED', connected: false, last_error: { code: 'WA_ERROR_CODE_CONFLICT', message: 'account_takeover' } },
     ],
   });
   if (path === '/api/wa/account-settings/2fa/status') return json(res, {
@@ -150,7 +150,9 @@ const server = http.createServer(async (req, res) => {
       method_statuses: [{ method: 'sms', available: true }],
       phone_status: { sms_available: true },
     });
-    if (path === '/api/wa/register') return json(res, { success: true, status: 'otp_required', wa_account_id: body.e164_number === '+573145865572' ? platformAccountID : accountID, verification_request_id: verificationRequestID, delivery_method: body.delivery_method || 'sms' });
+    if (path === '/api/wa/register') return json(res, { success: true, status: 'otp_required', wa_account_id: body.e164_number === '+573145865572' ? platformAccountID : accountID, verification_request_id: verificationRequestID, delivery_method: body.delivery_method || 'sms', retry_after_seconds: 12, account_transfer_challenge: body.delivery_method === 'wa_old' ? { type: 'wa_old' } : undefined });
+    if (path === '/api/wa/actions/registration/account-transfer/refresh') return json(res, { success: true, verification_request_id: body.verification_request_id, account_transfer_challenge: { type: 'wa_old', refreshed: true } });
+    if (path === '/api/wa/actions/registration/account-transfer/poll') return json(res, { success: true, status: 'pending', verification_request_id: body.verification_request_id, wa_account_id: body.wa_account_id });
     if (path === '/api/wa/actions/registration/resume-otp') {
       if (body.wa_account_id === platformAccountID) {
         platformOtpSubmitCount += 1;
@@ -359,8 +361,9 @@ async function main() {
       return true;
     `);
     if (!loadedMore) throw new Error('Load more accounts action failed');
-    checks.accountPagination = await waitForExpression(client, 'document.body.innerText.includes("Pending Account") && Boolean(document.querySelector(".connection-dot.warn"))');
-    checks.chatThread = await waitForExpression(client, 'document.body.innerText.includes("Mock Contact") && document.body.innerText.includes("Mock hello from object text") && document.body.innerText.includes("Mock reply") && !document.body.innerText.includes("[object Object]")');
+    checks.accountPagination = await waitForExpression(client, 'document.body.innerText.includes("Pending Account") && Boolean(document.querySelector(".connection-dot.bad"))');
+    checks.chatThread = await waitForExpression(client, 'document.body.innerText.includes("Mock Contact") && document.body.innerText.includes("Mock hello from object text") && document.body.innerText.includes("Mock reply") && Boolean(document.querySelector(".transfer-otp-banner")) && !document.body.innerText.includes("[object Object]")');
+    if (!checks.chatThread) throw new Error('Chat thread or transfer OTP banner did not render');
     await runInPage(client, `
       const setValue = (input, value) => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
@@ -439,8 +442,11 @@ async function main() {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
         input.dispatchEvent(new Event('input', { bubbles: true }));
       };
-      const passwordInputs = [...document.querySelectorAll('input[type="password"]')].filter((input) => input.offsetParent !== null);
-      const pin = passwordInputs.find((input) => input.closest('.form-grid.two'));
+      const openButton = [...document.querySelectorAll('.security-actions button')].find((button) => button.innerText.includes('PIN'));
+      if (!openButton) throw new Error('PIN modal button not found');
+      openButton.click();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const pin = document.querySelector('.modal-panel input[type="password"]');
       if (!pin) throw new Error('PIN input not found');
       setValue(pin, '123456');
       let button = pin.closest('label')?.nextElementSibling;
@@ -458,7 +464,16 @@ async function main() {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
         input.dispatchEvent(new Event('input', { bubbles: true }));
       };
-      const email = [...document.querySelectorAll('input[type="email"]')][0];
+      document.querySelector('.modal-panel [aria-label="关闭"]')?.click();
+      let openButton;
+      for (let index = 0; index < 30 && !openButton; index += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        openButton = [...document.querySelectorAll('button')].find((button) => button.innerText.includes('\u8bbe\u7f6e\u8d26\u6237\u90ae\u7bb1'));
+      }
+      if (!openButton) throw new Error('Email modal button not found; buttons=' + JSON.stringify([...document.querySelectorAll('button')].map((button) => button.innerText)));
+      openButton.click();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const email = document.querySelector('.modal-panel input[type="email"]');
       if (!email) throw new Error('Email input not found');
       setValue(email, 'desktop-smoke@example.com');
       let button = email.closest('label')?.nextElementSibling;
@@ -476,12 +491,9 @@ async function main() {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
         input.dispatchEvent(new Event('input', { bubbles: true }));
       };
-      const accountPage = [...document.querySelectorAll('.app-shell[data-view=account] .account-page')].find((page) => page.offsetParent !== null);
-      const email = accountPage.querySelector('input[type="email"]');
-      const passwordInputs = [...email.closest('.form-grid.two').querySelectorAll('input[type="password"]')].filter((input) => input.offsetParent !== null);
-      const otp = passwordInputs[1];
+      const otp = [...document.querySelectorAll('.modal-panel input[type="password"]')].pop();
       if (!otp) throw new Error('Email OTP input not found');
-      const actions = otp.closest('.form-grid.two').querySelector('.inline-actions');
+      const actions = otp.closest('.form-grid').querySelector('.inline-actions');
       const buttons = [...actions.querySelectorAll('button')];
       buttons[0]?.click();
       setValue(otp, '654321');
@@ -492,6 +504,22 @@ async function main() {
     `);
     await waitForOperation('/api/wa/account-settings/email/otp/request');
     await waitForOperation('/api/wa/account-settings/email/otp/verify');
+    await runInPage(client, `
+      document.querySelector('.modal-panel [aria-label="关闭"]')?.click();
+      let openButton;
+      for (let index = 0; index < 30 && !openButton; index += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        openButton = [...document.querySelectorAll('button')].find((button) => button.innerText.includes('\u6362\u7ed1\u624b\u673a\u53f7'));
+      }
+      if (!openButton) throw new Error('Change number modal button not found; buttons=' + JSON.stringify([...document.querySelectorAll('button')].map((button) => button.innerText)));
+      openButton.click();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (!document.body.innerText.includes('Change number')) throw new Error('Change number modal did not open');
+      const button = [...document.querySelectorAll('.modal-panel .primary-button')].pop();
+      if (!button) throw new Error('Change number placeholder button not found');
+      button.click();
+      return true;
+    `);
     checks.accountPage = true;
     checks.accountActions = true;
     await route(client, '#/add', 'Boolean(document.querySelector(".app-shell[data-view=add] .add-page"))');
@@ -538,6 +566,26 @@ async function main() {
     checks.registrationActions = true;
     const manualOtpOperation = (await getOperations()).slice(operationsBeforeRegistrationOtp).find((operation) => operation.path === '/api/wa/actions/registration/resume-otp');
     if (manualOtpOperation?.body?.verification_request_id !== 'wavrf-manual-1') throw new Error('Manual OTP submit did not include verification_request_id');
+    const operationsBeforeTransfer = (await getOperations()).length;
+    await runInPage(client, `
+      const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
+      let refresh;
+      let poll;
+      for (let index = 0; index < 40; index += 1) {
+        refresh = addPage.querySelector('[data-action="refresh-transfer"]');
+        poll = addPage.querySelector('[data-action="poll-transfer"]');
+        if (refresh && !refresh.disabled && poll && !poll.disabled) break;
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      if (!refresh || refresh.disabled || !poll || poll.disabled) throw new Error('Transfer refresh/poll buttons are not ready');
+      refresh.click();
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      poll.click();
+      return true;
+    `);
+    await waitForOperation('/api/wa/actions/registration/account-transfer/refresh', 'POST', 15000, operationsBeforeTransfer);
+    await waitForOperation('/api/wa/actions/registration/account-transfer/poll', 'POST', 15000, operationsBeforeTransfer);
+    checks.accountTransferActions = true;
     const operationsBeforePlatform = (await getOperations()).length;
     await runInPage(client, `
       const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
@@ -672,6 +720,15 @@ async function main() {
     checks.smsProviderSelector = await runInPage(client, `
       const text = document.body.innerText;
       if (!text.includes('SMSBower') || !text.includes('Hero-SMS')) throw new Error('SMS provider selector options are not visible');
+      if (!document.querySelector('[data-field="local-common-proxy"]') || !document.querySelector('[data-field="local-device-profiles-file"]')) throw new Error('Local service advanced fields are not visible');
+      return true;
+    `);
+    checks.themeToggle = await runInPage(client, `
+      const button = document.querySelector('[data-action="toggle-theme"]');
+      if (!button) throw new Error('Theme toggle button not found');
+      button.click();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (document.documentElement.dataset.theme !== 'dark') throw new Error('Theme did not switch to dark');
       return true;
     `);
     await evaluate(client, 'window.smsbower.stopRegistrationTask()');

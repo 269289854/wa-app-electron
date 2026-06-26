@@ -8,6 +8,8 @@ type ClientConfig = {
   remoteBaseUrl: string;
   localBaseUrl: string;
   localDataDir: string;
+  localCommonProxy: string;
+  localDeviceProfilesFile: string;
   autoStartLocalService: boolean;
   smsCancelQueuePollIntervalSeconds: number;
   smsProvider: SMSProvider;

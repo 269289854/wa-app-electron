@@ -98,9 +98,10 @@ export function sendTextMessage(accountID: string, contactRef: string, text: str
   return apiRequest('/api/wa/messages/send', { method: 'POST', body: { wa_account_id: accountID, contact_ref: contactRef, text } });
 }
 
-export function getOtpMessages(accountID: string, cursor = '') {
-  const params = new URLSearchParams({ wa_account_id: accountID, limit: '20' });
+export function getOtpMessages(accountID: string, cursor = '', options: { includeSensitiveValues?: boolean; limit?: number } = {}) {
+  const params = new URLSearchParams({ wa_account_id: accountID, limit: String(options.limit || 20) });
   if (cursor) params.set('cursor', cursor);
+  if (options.includeSensitiveValues !== undefined) params.set('include_sensitive_values', String(options.includeSensitiveValues));
   return apiRequest<ListOtpMessagesResponse>(`/api/wa/account-otp-messages?${params}`);
 }
 
@@ -126,6 +127,22 @@ export function submitRegistrationOTP(accountID: string, otp: string, input: Sub
   const body: Record<string, string> = { wa_account_id: accountID, otp };
   if (input.verificationRequestID) body.verification_request_id = input.verificationRequestID;
   return apiRequest<WorkflowResponse>('/api/wa/actions/registration/resume-otp', { method: 'POST', body, timeoutMs: 70000 });
+}
+
+export function refreshAccountTransferChallenge(verificationRequestID: string) {
+  return apiRequest<WorkflowResponse>('/api/wa/actions/registration/account-transfer/refresh', {
+    method: 'POST',
+    body: { verification_request_id: verificationRequestID },
+    timeoutMs: 70000,
+  });
+}
+
+export function pollAccountTransferRegistration(verificationRequestID: string, waAccountID = '', maxAttempts = 1) {
+  return apiRequest<WorkflowResponse>('/api/wa/actions/registration/account-transfer/poll', {
+    method: 'POST',
+    body: { verification_request_id: verificationRequestID, wa_account_id: waAccountID, max_attempts: maxAttempts },
+    timeoutMs: 70000,
+  });
 }
 
 export function isTransientOTPSubmitError(error: unknown) {

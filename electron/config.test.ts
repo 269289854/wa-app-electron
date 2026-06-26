@@ -36,6 +36,8 @@ describe('electron config helpers', () => {
     expect(config.smsProvider).toBe('smsbower');
     expect(config.smsCancelQueuePollIntervalSeconds).toBe(5);
     expect(config.localDataDir).toContain('wa-app-data');
+    expect(config.localCommonProxy).toBe('');
+    expect(config.localDeviceProfilesFile).toBe('');
     expect(config.smsbower).toMatchObject({ enabled: false, targetSuccessCount: 1, maxOrders: 3, numberIntervalSeconds: 0, openAIPhoneCheckEnabled: false });
     expect(config.windowState).toEqual({ width: 1320, height: 860 });
   });
@@ -46,6 +48,8 @@ describe('electron config helpers', () => {
       remoteBaseUrl: 'https://example.com/base/?x=1#hash',
       localBaseUrl: 'http://127.0.0.1:9000///healthz',
       localDataDir: '',
+      localCommonProxy: ' socks5://127.0.0.1:10808 ',
+      localDeviceProfilesFile: ' C:/wa/device_profiles.json ',
       autoStartLocalService: 1 as unknown as boolean,
       smsCancelQueuePollIntervalSeconds: 999,
       windowState: { width: 9999, height: 12, maximized: true },
@@ -56,6 +60,8 @@ describe('electron config helpers', () => {
     expect(config.localBaseUrl).toBe('http://127.0.0.1:9000///healthz');
     expect(config.localDataDir.replaceAll('\\', '/')).toContain('C:/data');
     expect(config.localDataDir.replaceAll('\\', '/')).toContain('wa-app-data');
+    expect(config.localCommonProxy).toBe('socks5://127.0.0.1:10808');
+    expect(config.localDeviceProfilesFile).toBe('C:/wa/device_profiles.json');
     expect(config.autoStartLocalService).toBe(true);
     expect(config.smsCancelQueuePollIntervalSeconds).toBe(300);
     expect(config.windowState).toMatchObject({ width: 2400, height: 680, maximized: true });

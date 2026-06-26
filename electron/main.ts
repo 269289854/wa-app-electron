@@ -424,6 +424,8 @@ async function startLocalService() {
       WA_APP_LISTEN_ADDR: '127.0.0.1:0',
       WA_APP_DATA_DIR: config.localDataDir,
       WA_APP_AUTH_PASSWORD: getPassword(config),
+      WA_COMMON_PROXY: config.localCommonProxy,
+      WA_APP_DEVICE_PROFILES_FILE: config.localDeviceProfilesFile,
     },
   });
   localProcess.once('exit', () => {

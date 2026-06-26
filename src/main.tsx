@@ -25,6 +25,11 @@ import {
   Upload,
   Wifi,
   WifiOff,
+  ArrowRightLeft,
+  Copy,
+  Moon,
+  PhoneForwarded,
+  Sun,
 } from 'lucide-react';
 import './styles.css';
 import {
@@ -49,8 +54,10 @@ import {
   messageTime,
   normalizeContacts,
   normalizeTwoFactorStatus,
+  pollAccountTransferRegistration,
   probePhoneSMS,
   registerPhone,
+  refreshAccountTransferChallenge,
   removeProfilePicture,
   resolveContacts,
   requestEmailOtp,
@@ -64,6 +71,7 @@ import {
   timestampValue,
   type PhoneInput,
 } from './api';
+import { accountDisplayStatus, connectionRank, connectionView, isRegistrationPending, type LongConnectionRecord } from './wa-status';
 import { normalizePhoneInput } from './phone-input';
 import { probeStatus, registrationMethods, statusReason } from './result-model';
 import { normalizeOpenAIPhoneCheckResult } from './openai-phone-check';
@@ -111,6 +119,7 @@ function DesktopApp() {
   const [loadedAccounts, setLoadedAccounts] = useState<WAAccount[]>([]);
   const [accountSearch, setAccountSearch] = useState('');
   const [accountAvatarVersion, setAccountAvatarVersion] = useState(() => String(Date.now()));
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => localStorage.getItem('wa-theme') === 'dark' ? 'dark' : 'light');
   const [toasts, setToasts] = useState<Toast[]>([]);
   const notify = (kind: Toast['kind'], message: string) => {
     const id = Date.now() + Math.random();
@@ -169,6 +178,10 @@ function DesktopApp() {
 
   const selectedAccount = accounts.find((account) => accountID(account) === selectedAccountID);
   const connected = apiReady;
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('wa-theme', theme);
+  }, [theme]);
   const refreshAccounts = useCallback(() => {
     setAccountCursor('');
     void queryClient.invalidateQueries({ queryKey: ['accounts'] });
@@ -242,6 +255,8 @@ function DesktopApp() {
           connected={connected}
           config={configQuery.data}
           checking={connectionQuery.isFetching}
+          theme={theme}
+          onToggleTheme={() => setTheme((value) => value === 'dark' ? 'light' : 'dark')}
           error={needsRemotePassword ? '请先在设置中保存访问密码。' : connectionQuery.data?.error}
           onRefresh={() => {
             void connectionQuery.refetch();
@@ -378,7 +393,7 @@ function LaunchScreen() {
   );
 }
 
-function TopBar({ view, connected, config, checking, error, onRefresh }: { view: View; connected: boolean; config?: ClientConfig; checking: boolean; error?: string; onRefresh: () => void }) {
+function TopBar({ view, connected, config, checking, theme, error, onRefresh, onToggleTheme }: { view: View; connected: boolean; config?: ClientConfig; checking: boolean; theme: 'light' | 'dark'; error?: string; onRefresh: () => void; onToggleTheme: () => void }) {
   const copy = pageCopy(view);
   return (
     <header className="top-bar">
@@ -399,6 +414,9 @@ function TopBar({ view, connected, config, checking, error, onRefresh }: { view:
           <span className="endpoint">{config?.mode === 'local' ? config.localBaseUrl || '本地服务' : config?.remoteBaseUrl}</span>
           {error ? <span className="top-error">{error}</span> : null}
         </div>
+        <button className="secondary-button icon-only-button" data-action="toggle-theme" title={theme === 'dark' ? '切换到亮色' : '切换到暗色'} aria-label={theme === 'dark' ? '切换到亮色' : '切换到暗色'} onClick={onToggleTheme}>
+          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
         <button className="secondary-button refresh-button" title="刷新" onClick={onRefresh}>
           <RefreshCw size={16} className={checking ? 'spin' : ''} />
           刷新
@@ -444,6 +462,8 @@ function ChatPanel({ account, selectedContactID, onSelectContact, notify }: { ac
     if (activeContactID && activeContactID !== selectedContactID) onSelectContact(activeContactID);
   }, [activeContactID, onSelectContact, selectedContactID]);
   const messagesQuery = useQuery({ queryKey: ['messages', accountId, activeContactID], queryFn: () => getMessages(accountId, activeContactID), enabled: Boolean(accountId && activeContactID), refetchInterval: 8000 });
+  const otpQuery = useQuery({ queryKey: ['otp-active', accountId], queryFn: () => getOtpMessages(accountId, '', { includeSensitiveValues: true, limit: 5 }), enabled: Boolean(accountId), refetchInterval: 5000 });
+  const activeOtp = useMemo(() => latestActiveOtp([...(otpQuery.data?.otp_messages || []), ...(otpQuery.data?.messages || [])]), [otpQuery.data]);
   const sendMutation = useMutation({
     mutationFn: (text: string) => sendTextMessage(accountId, activeContactID, text),
     onSuccess: async () => {
@@ -507,6 +527,7 @@ function ChatPanel({ account, selectedContactID, onSelectContact, notify }: { ac
       <Thread
         accountID={accountId}
         contact={contacts.find((item) => item.contact_id === activeContactID)}
+        activeOtp={activeOtp}
         messages={messagesQuery.data?.messages || []}
         loading={messagesQuery.isFetching}
         sending={sendMutation.isPending}
@@ -515,6 +536,7 @@ function ChatPanel({ account, selectedContactID, onSelectContact, notify }: { ac
         onDeleteMessage={(messageID) => {
           if (window.confirm('删除这条本地消息？')) deleteMessageMutation.mutate(messageID);
         }}
+        notify={notify}
       />
     </section>
   );
@@ -563,21 +585,25 @@ function ContactList({ contacts, loading, activeID, onSelect, onDelete }: { acco
 function Thread({
   accountID: _accountID,
   contact,
+  activeOtp,
   messages,
   loading,
   sending,
   deletingMessageID,
   onSend,
   onDeleteMessage,
+  notify,
 }: {
   accountID: string;
   contact?: ReturnType<typeof normalizeContacts>[number];
+  activeOtp?: AccountMessage;
   messages: AccountMessage[];
   loading: boolean;
   sending: boolean;
   deletingMessageID?: string;
   onSend: (text: string) => void;
   onDeleteMessage: (messageID: string) => void;
+  notify: (kind: Toast['kind'], message: string) => void;
 }) {
   const [text, setText] = useState('');
   const sorted = [...messages].sort((left, right) => Number(messageTime(left)?.getTime() || 0) - Number(messageTime(right)?.getTime() || 0));
@@ -592,6 +618,7 @@ function Thread({
         {loading ? <Loader2 className="spin muted-icon" size={16} /> : null}
       </div>
       <div className="message-list">
+        <TransferOtpBanner message={activeOtp} notify={notify} />
         {sorted.map((message, index) => (
           <MessageBubble
             key={message.account_message_id || message.message_id || index}
@@ -641,12 +668,66 @@ function MessageBubble({ message, deleting, onDelete }: { message: AccountMessag
   );
 }
 
+function TransferOtpBanner({ message, notify }: { message?: AccountMessage; notify: (kind: Toast['kind'], message: string) => void }) {
+  const code = message ? otpCode(message) : '';
+  if (!message || !code) return null;
+  return (
+    <div className="transfer-otp-banner">
+      <div>
+        <strong><ShieldCheck size={15} />账号转出 · 旧设备验证</strong>
+        <code>{formatOtpCode(code)}</code>
+        <span>在新设备 WhatsApp 输入此码完成转入 · {otpExpiryText(message)}</span>
+      </div>
+      <button className="secondary-button icon-only-button" title="复制验证码" aria-label="复制验证码" onClick={() => copyText(code, notify)}>
+        <Copy size={15} />
+      </button>
+    </div>
+  );
+}
+
+function latestActiveOtp(messages: AccountMessage[]) {
+  const now = Date.now();
+  return messages.find((message) => {
+    const code = otpCode(message);
+    if (!code) return false;
+    const expiresAt = timestampValue(message.expires_at)?.getTime();
+    return !expiresAt || expiresAt > now;
+  });
+}
+
+function otpCode(message: AccountMessage) {
+  const direct = messageText(message).replace(/\s+/g, '');
+  const raw = direct || String((message.otp && typeof message.otp === 'object' ? ((message.otp as { value?: unknown; redacted_value?: unknown }).value || (message.otp as { redacted_value?: unknown }).redacted_value) : '') || '');
+  const match = raw.match(/\d{4,8}/);
+  return match?.[0] || '';
+}
+
+function formatOtpCode(code: string) {
+  const compact = code.replace(/\s+/g, '');
+  return compact.length === 6 ? `${compact.slice(0, 3)} ${compact.slice(3)}` : compact;
+}
+
+function otpExpiryText(message: AccountMessage) {
+  const expiresAt = timestampValue(message.expires_at)?.getTime();
+  if (!expiresAt) return '等待过期时间';
+  const remaining = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+  return remaining > 0 ? `${remaining} 秒后过期` : '已过期';
+}
+
+function copyText(text: string, notify: (kind: Toast['kind'], message: string) => void) {
+  void navigator.clipboard.writeText(text)
+    .then(() => notify('success', '验证码已复制'))
+    .catch(() => notify('error', '复制失败'));
+}
+
 function AccountPanel({ account, avatarVersion, notify, onChanged, onAvatarChanged }: { account?: WAAccount; avatarVersion: string; notify: (kind: Toast['kind'], message: string) => void; onChanged: () => void; onAvatarChanged: () => void }) {
   const queryClient = useQueryClient();
   const accountId = accountID(account);
   const profilesQuery = useQuery({ queryKey: ['profiles', accountId], queryFn: () => getClientProfiles(accountId), enabled: Boolean(accountId), refetchInterval: 30000 });
   const otpQuery = useQuery({ queryKey: ['otp', accountId], queryFn: () => getOtpMessages(accountId), enabled: Boolean(accountId), refetchInterval: 30000 });
   const connectionsQuery = useQuery({ queryKey: ['connections', accountId], queryFn: () => getConnections({ wa_account_id: accountId }), enabled: Boolean(accountId), refetchInterval: 10000 });
+  const connection = indexConnections(connectionsQuery.data).get(accountId);
+  const displayStatus = accountDisplayStatus(account, connection);
   const deleteMutation = useMutation({
     mutationFn: () => deleteAccount(accountId),
     onSuccess: () => {
@@ -663,7 +744,7 @@ function AccountPanel({ account, avatarVersion, notify, onChanged, onAvatarChang
         <div>
           <h1>{accountTitle(account)}</h1>
           <p>{account.phone?.e164_number || accountId}</p>
-          <span className={`status-pill ${isRegistrationPending(account) ? 'warn' : 'ok'}`}><Circle size={10} fill="currentColor" />{isRegistrationPending(account) ? '等待 OTP' : String(account.status || 'ACTIVE')}</span>
+          <span className={`status-pill ${displayStatus.tone}`}><Circle size={10} fill="currentColor" />{displayStatus.label}</span>
         </div>
         <button className="danger-button" onClick={() => window.confirm('确定删除该账号？') && deleteMutation.mutate()}>
           <Trash2 size={15} />
@@ -673,7 +754,7 @@ function AccountPanel({ account, avatarVersion, notify, onChanged, onAvatarChang
       {isRegistrationPending(account) ? <ManualOtpCard key={`otp-${accountId}`} account={account} notify={notify} onChanged={onChanged} /> : null}
       <div className="dashboard-grid">
         <ProfileCard key={`profile-${accountId}`} account={account} notify={notify} onChanged={() => { onChanged(); void queryClient.invalidateQueries({ queryKey: ['accounts'] }); }} onAvatarChanged={onAvatarChanged} />
-        <AccountInfoCard account={account} />
+        <AccountInfoCard account={account} connection={connection} />
         <SecurityCard key={`security-${accountId}`} account={account} notify={notify} />
         <InfoCard title="设备指纹" icon={<Fingerprint size={17} />}>
           <ProfilesList profiles={profilesQuery.data?.client_profiles || []} loading={profilesQuery.isLoading} />
@@ -682,6 +763,7 @@ function AccountPanel({ account, avatarVersion, notify, onChanged, onAvatarChang
           <MessageMiniList messages={[...(otpQuery.data?.otp_messages || []), ...(otpQuery.data?.messages || [])]} />
         </InfoCard>
         <InfoCard title="长连接" icon={<Server size={17} />}>
+          <StatusCallout tone={connectionView(connection, connectionsQuery.isLoading).tone} title={connectionView(connection, connectionsQuery.isLoading).label} detail={displayStatus.label === '已转出' ? '账号已在其他设备登录或被转出，本地长连接已停止。' : '账号在线态由长连接实况派生。'} />
           <pre className="json-box">{JSON.stringify(connectionsQuery.data || {}, null, 2)}</pre>
         </InfoCard>
       </div>
@@ -718,9 +800,11 @@ function ManualOtpCard({ account, notify, onChanged }: { account: WAAccount; not
   );
 }
 
-function AccountInfoCard({ account }: { account: WAAccount }) {
+function AccountInfoCard({ account, connection }: { account: WAAccount; connection?: LongConnectionRecord }) {
+  const displayStatus = accountDisplayStatus(account, connection);
   const rows = [
     { label: '账号 ID', value: accountID(account) },
+    { label: '状态', value: displayStatus.label },
     { label: '手机号', value: account.phone?.e164_number || '-' },
     { label: '国家', value: account.phone?.country_iso2 || '-' },
     { label: '拨号码', value: account.phone?.country_calling_code || '-' },
@@ -858,6 +942,9 @@ function SecurityCard({ account, notify }: { account: WAAccount; notify: (kind: 
   const [pin, setPin] = useState('');
   const [email, setEmail] = useState('');
   const [emailOtp, setEmailOtp] = useState('');
+  const [pinOpen, setPinOpen] = useState(false);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [changeNumberOpen, setChangeNumberOpen] = useState(false);
   const statusQuery = useQuery({ queryKey: ['2fa', accountId], queryFn: () => getTwoFactorStatus(accountId, true), enabled: false });
   const securityStatus = normalizeTwoFactorStatus(account.two_factor_auth, statusQuery.data?.status);
   const makeMutation = (fn: () => Promise<unknown>, message: string) => useMutation({
@@ -884,36 +971,88 @@ function SecurityCard({ account, notify }: { account: WAAccount; notify: (kind: 
         <span>{securityStatus.emailAddress || '未配置邮箱'}</span>
         <span>{securityStatus.emailLabel}</span>
       </div>
-      <div className="form-grid two">
-        <label>
-          6 位 PIN
-          <input value={pin} onChange={(event) => setPin(event.target.value.replace(/\D+/g, '').slice(0, 6))} type="password" disabled={pinMutation.isPending} />
-        </label>
-        <button className="primary-button" disabled={pin.length !== 6 || pinMutation.isPending} onClick={() => pinMutation.mutate()}>
-          {pinMutation.isPending ? <Loader2 className="spin" size={15} /> : <KeyRound size={15} />}
-          {pinMutation.isPending ? '设置中...' : '设置/修改 PIN'}
-        </button>
-        <label>
-          邮箱
-          <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" disabled={emailMutation.isPending} />
-        </label>
-        <button className="primary-button" disabled={!email || emailMutation.isPending} onClick={() => emailMutation.mutate()}>
-          {emailMutation.isPending ? <Loader2 className="spin" size={15} /> : <AtSign size={15} />}
-          {emailMutation.isPending ? '设置中...' : '设置邮箱'}
-        </button>
-        <label>
-          邮箱 OTP
-          <input value={emailOtp} onChange={(event) => setEmailOtp(event.target.value.replace(/\D+/g, '').slice(0, 6))} type="password" />
-        </label>
-        <div className="inline-actions">
-          <button className="secondary-button" onClick={() => otpRequestMutation.mutate()}>请求 OTP</button>
-          <button className="primary-button" disabled={emailOtp.length !== 6} onClick={() => otpVerifyMutation.mutate()}>
-            <Check size={15} />
-            校验
+      <div className="security-actions">
+        <button className="secondary-button" onClick={() => { setPin(''); setPinOpen(true); }}><KeyRound size={15} />设置/修改 PIN</button>
+        <button className="secondary-button" onClick={() => { setEmail(''); setEmailOtp(''); setEmailOpen(true); }}><AtSign size={15} />设置账户邮箱</button>
+        <button className="secondary-button" onClick={() => setChangeNumberOpen(true)}><PhoneForwarded size={15} />换绑手机号</button>
+      </div>
+      <Modal open={pinOpen} title="两步验证 PIN" icon={<ShieldCheck size={16} />} onClose={() => setPinOpen(false)}>
+        <div className="form-grid">
+          <label>
+            6 位 PIN
+            <input value={pin} onChange={(event) => setPin(event.target.value.replace(/\D+/g, '').slice(0, 6))} type="password" disabled={pinMutation.isPending} autoFocus />
+          </label>
+          <button className="primary-button" disabled={pin.length !== 6 || pinMutation.isPending} onClick={() => pinMutation.mutate()}>
+            {pinMutation.isPending ? <Loader2 className="spin" size={15} /> : <KeyRound size={15} />}
+            {pinMutation.isPending ? '设置中...' : '提交 PIN'}
           </button>
         </div>
-      </div>
+      </Modal>
+      <Modal open={emailOpen} title="账户邮箱" icon={<AtSign size={16} />} onClose={() => setEmailOpen(false)}>
+        <div className="form-grid">
+          <label>
+            邮箱
+            <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" disabled={emailMutation.isPending} autoFocus />
+          </label>
+          <button className="primary-button" disabled={!email || emailMutation.isPending} onClick={() => emailMutation.mutate()}>
+            {emailMutation.isPending ? <Loader2 className="spin" size={15} /> : <AtSign size={15} />}
+            设置邮箱
+          </button>
+          <label>
+            邮箱 OTP
+            <input value={emailOtp} onChange={(event) => setEmailOtp(event.target.value.replace(/\D+/g, '').slice(0, 6))} type="password" />
+          </label>
+          <div className="inline-actions">
+            <button className="secondary-button" onClick={() => otpRequestMutation.mutate()}><Send size={15} />请求 OTP</button>
+            <button className="primary-button" disabled={emailOtp.length !== 6} onClick={() => otpVerifyMutation.mutate()}><Check size={15} />校验</button>
+          </div>
+        </div>
+      </Modal>
+      <Modal open={changeNumberOpen} title="换绑手机号" icon={<PhoneForwarded size={16} />} onClose={() => setChangeNumberOpen(false)}>
+        <ChangeNumberPlaceholder account={account} notify={notify} />
+      </Modal>
     </InfoCard>
+  );
+}
+
+function Modal({ open, title, icon, children, onClose }: { open: boolean; title: string; icon?: React.ReactNode; children: React.ReactNode; onClose: () => void }) {
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section className="modal-panel" role="dialog" aria-modal="true" aria-label={title}>
+        <header>
+          <h2>{icon}{title}</h2>
+          <button className="secondary-button icon-only-button" aria-label="关闭" onClick={onClose}>×</button>
+        </header>
+        {children}
+      </section>
+    </div>
+  );
+}
+
+function ChangeNumberPlaceholder({ account, notify }: { account: WAAccount; notify: (kind: Toast['kind'], message: string) => void }) {
+  const [countryCallingCode, setCountryCallingCode] = useState('');
+  const [phone, setPhone] = useState('');
+  return (
+    <div className="form-grid">
+      <p className="card-intro">对应已登录账号安全设置里的 Change number，不是注册侧旧设备验证。</p>
+      <label>
+        当前手机号
+        <input value={account.phone?.e164_number || '-'} readOnly />
+      </label>
+      <label>
+        新国家拨号码
+        <input value={countryCallingCode} onChange={(event) => setCountryCallingCode(event.target.value)} placeholder="+1" />
+      </label>
+      <label>
+        新手机号
+        <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="4155550123" />
+      </label>
+      <button className="primary-button" onClick={() => notify('error', '换绑手机号链路尚未接入：需要按 APK ChangeNumber/ChangeNumberOverview 链路补齐后端实现')}>
+        <PhoneForwarded size={15} />
+        发起换绑
+      </button>
+    </div>
   );
 }
 
@@ -1274,7 +1413,50 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
   const platformConfigured = Boolean(smsConfig?.configured);
   const platformCountryLabel = countryDisplayName(smsbowerCountriesQuery.data || [], smsConfig?.country || '');
   const platformBusy = platformRegisterMutation.isPending;
+  const transferVisible = method === 'wa_old' || Boolean(probe?.account_transfer_challenge);
   const addAccountBusy = probeAndRegisterMutation.isPending || otpMutation.isPending || platformBusy;
+  const transferRefreshMutation = useMutation({
+    mutationFn: () => {
+      if (!pendingVerificationRequestID) throw new Error('缺少 verification_request_id');
+      const exchange = debugRequest('刷新旧设备验证', '/api/wa/actions/registration/account-transfer/refresh', { verification_request_id: pendingVerificationRequestID });
+      setDebugExchanges((items) => [...items, exchange]);
+      return refreshAccountTransferChallenge(pendingVerificationRequestID)
+        .then((response) => {
+          setDebugExchanges((items) => replaceDebugExchange(items, exchange, { ...exchange, response: sanitizeDebugValue(response) }));
+          return response;
+        })
+        .catch((error) => {
+          setDebugExchanges((items) => replaceDebugExchange(items, exchange, { ...exchange, error: debugError(error) }));
+          throw error;
+        });
+    },
+    onSuccess: (result) => {
+      setProbe(result);
+      notify(result.error_message || result.success === false ? 'error' : 'success', result.error_message || '旧设备验证已刷新');
+    },
+    onError: (error) => notify('error', errorMessage(error)),
+  });
+  const transferPollMutation = useMutation({
+    mutationFn: () => {
+      if (!pendingVerificationRequestID) throw new Error('缺少 verification_request_id');
+      const exchange = debugRequest('轮询旧设备转入', '/api/wa/actions/registration/account-transfer/poll', { verification_request_id: pendingVerificationRequestID, wa_account_id: pendingAccountID, max_attempts: 3 });
+      setDebugExchanges((items) => [...items, exchange]);
+      return pollAccountTransferRegistration(pendingVerificationRequestID, pendingAccountID, 3)
+        .then((response) => {
+          setDebugExchanges((items) => replaceDebugExchange(items, exchange, { ...exchange, response: sanitizeDebugValue(response) }));
+          return response;
+        })
+        .catch((error) => {
+          setDebugExchanges((items) => replaceDebugExchange(items, exchange, { ...exchange, error: debugError(error) }));
+          throw error;
+        });
+    },
+    onSuccess: (result) => {
+      notify(result.error_message || result.success === false ? 'error' : 'success', result.error_message || '旧设备转入状态已更新');
+      onChanged();
+    },
+    onError: (error) => notify('error', errorMessage(error)),
+  });
   useEffect(() => {
     const onStart = (event: Event) => {
       const requestId = (event as CustomEvent<{ requestId?: string }>).detail?.requestId || '';
@@ -1334,6 +1516,14 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
         <InfoCard title="OTP" icon={<KeyRound size={17} />}>
           <div className="form-grid">
             <p className="card-intro">提交 WhatsApp 注册验证码，支持保留 verification_request_id。</p>
+            {transferVisible ? (
+              <StatusCallout
+                tone="warn"
+                title="旧设备转入"
+                detail="旧设备通道用于从仍在线的真机 WhatsApp 转入账号。验证码会发到旧设备或旧设备聊天，请读取后提交。"
+                meta={probe?.retry_after_seconds ? `冷却 ${probe.retry_after_seconds}s` : pendingVerificationRequestID}
+              />
+            ) : null}
             <label>
               待注册账号 ID
               <input value={pendingAccountID} onChange={(event) => setPendingAccountID(event.target.value)} placeholder="wa_account_id" disabled={addAccountBusy} />
@@ -1350,6 +1540,16 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
               {otpMutation.isPending ? <Loader2 className="spin" size={15} /> : <KeyRound size={15} />}
               提交 OTP
             </button>
+            <div className="inline-actions">
+              <button className="secondary-button" data-action="refresh-transfer" disabled={!pendingVerificationRequestID || transferRefreshMutation.isPending || addAccountBusy} onClick={() => transferRefreshMutation.mutate()}>
+                {transferRefreshMutation.isPending ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+                刷新旧设备验证
+              </button>
+              <button className="secondary-button" data-action="poll-transfer" disabled={!pendingVerificationRequestID || transferPollMutation.isPending || addAccountBusy} onClick={() => transferPollMutation.mutate()}>
+                {transferPollMutation.isPending ? <Loader2 className="spin" size={15} /> : <ArrowRightLeft size={15} />}
+                轮询转入状态
+              </button>
+            </div>
           </div>
         </InfoCard>
       </div>
@@ -1439,6 +1639,8 @@ type SettingsForm = {
   mode: ClientMode;
   remoteBaseUrl: string;
   localDataDir: string;
+  localCommonProxy: string;
+  localDeviceProfilesFile: string;
   autoStartLocalService: boolean;
   smsCancelQueuePollIntervalSeconds: number;
   password: string;
@@ -1923,6 +2125,8 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
     mode: 'remote' as ClientMode,
     remoteBaseUrl: '',
     localDataDir: '',
+    localCommonProxy: '',
+    localDeviceProfilesFile: '',
     autoStartLocalService: false,
     smsCancelQueuePollIntervalSeconds: 5,
     password: '',
@@ -1955,6 +2159,8 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
       mode: configQuery.data.mode,
       remoteBaseUrl: configQuery.data.remoteBaseUrl,
       localDataDir: configQuery.data.localDataDir,
+      localCommonProxy: configQuery.data.localCommonProxy,
+      localDeviceProfilesFile: configQuery.data.localDeviceProfilesFile,
       autoStartLocalService: configQuery.data.autoStartLocalService,
       smsCancelQueuePollIntervalSeconds: configQuery.data.smsCancelQueuePollIntervalSeconds,
       smsProvider: configQuery.data.smsProvider,
@@ -2036,6 +2242,14 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
             <label>
               本地数据目录
               <input value={form.localDataDir} onChange={(event) => setForm({ ...form, localDataDir: event.target.value })} />
+            </label>
+            <label>
+              WA 出站代理
+              <input data-field="local-common-proxy" value={form.localCommonProxy} onChange={(event) => setForm({ ...form, localCommonProxy: event.target.value })} placeholder="可选，例如 socks5://127.0.0.1:10808" />
+            </label>
+            <label>
+              设备画像池文件
+              <input data-field="local-device-profiles-file" value={form.localDeviceProfilesFile} onChange={(event) => setForm({ ...form, localDeviceProfilesFile: event.target.value })} placeholder="可选，留空使用内置多机型画像" />
             </label>
             <label className="check-row">
               <input checked={form.autoStartLocalService} onChange={(event) => setForm({ ...form, autoStartLocalService: event.target.checked })} type="checkbox" />
@@ -2335,8 +2549,6 @@ function requirePhone(input: PhoneInput | null) {
   return input;
 }
 
-type LongConnectionRecord = Record<string, unknown>;
-
 function mergeAccounts(current: WAAccount[], next: WAAccount[]) {
   const merged = new Map(current.map((account) => [accountID(account), account]));
   for (const account of next) {
@@ -2366,23 +2578,6 @@ function indexConnections(data?: { states?: LongConnectionRecord[]; connections?
   }, new Map<string, LongConnectionRecord>());
 }
 
-function connectionView(connection: LongConnectionRecord | undefined, loading: boolean) {
-  const status = String(connection?.status || '').toLowerCase();
-  if (loading && !connection) return { label: '连接状态加载中', tone: 'idle' };
-  if (connection?.connected === true || status.includes('connected') || status.includes('heartbeat')) return { label: '已连接', tone: 'ok' };
-  if (status.includes('reconnect') || status.includes('starting')) return { label: '连接中', tone: 'warn' };
-  if (status.includes('failed') || status.includes('error')) return { label: '连接失败', tone: 'bad' };
-  return { label: '未连接', tone: 'idle' };
-}
-
-function connectionRank(connection: LongConnectionRecord) {
-  const tone = connectionView(connection, false).tone;
-  if (tone === 'ok') return 0;
-  if (tone === 'warn') return 1;
-  if (tone === 'bad') return 2;
-  return 3;
-}
-
 function betterConnection(next: LongConnectionRecord, current: LongConnectionRecord) {
   const nextRank = connectionRank(next);
   const currentRank = connectionRank(current);
@@ -2393,11 +2588,6 @@ function betterConnection(next: LongConnectionRecord, current: LongConnectionRec
 function timestampMs(record: LongConnectionRecord) {
   const date = timestampValue(record.updated_at || record.last_heartbeat_at || record.connected_at || record.created_at);
   return date?.getTime() || 0;
-}
-
-function isRegistrationPending(account: WAAccount) {
-  const status = String(account.status || '').toLowerCase();
-  return status === '2' || status.includes('pending_registration') || status.includes('pending registration') || status.includes('otp');
 }
 
 function deviceTitle(fingerprint?: ClientProfile['device_fingerprint']) {

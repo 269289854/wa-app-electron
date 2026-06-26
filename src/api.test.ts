@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isTransientOTPSubmitError, messageText, normalizeTwoFactorStatus, submitRegistrationOTP } from './api';
+import { getOtpMessages, isTransientOTPSubmitError, messageText, normalizeTwoFactorStatus, pollAccountTransferRegistration, refreshAccountTransferChallenge, submitRegistrationOTP } from './api';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -76,6 +76,52 @@ describe('submitRegistrationOTP', () => {
         verification_request_id: 'wavrf_1',
         otp: '123456',
       },
+    });
+  });
+});
+
+describe('registration account transfer API', () => {
+  it('refreshes account transfer challenge by verification request id', async () => {
+    const request = vi.fn().mockResolvedValue({ success: true });
+    vi.stubGlobal('window', { waApi: { request } });
+
+    await refreshAccountTransferChallenge('wavrf_1');
+
+    expect(request).toHaveBeenCalledWith({
+      path: '/api/wa/actions/registration/account-transfer/refresh',
+      method: 'POST',
+      timeoutMs: 70000,
+      body: { verification_request_id: 'wavrf_1' },
+    });
+  });
+
+  it('polls account transfer registration with account and attempt limits', async () => {
+    const request = vi.fn().mockResolvedValue({ success: true });
+    vi.stubGlobal('window', { waApi: { request } });
+
+    await pollAccountTransferRegistration('wavrf_1', 'waacc_1', 3);
+
+    expect(request).toHaveBeenCalledWith({
+      path: '/api/wa/actions/registration/account-transfer/poll',
+      method: 'POST',
+      timeoutMs: 70000,
+      body: { verification_request_id: 'wavrf_1', wa_account_id: 'waacc_1', max_attempts: 3 },
+    });
+  });
+});
+
+describe('getOtpMessages', () => {
+  it('can request sensitive OTP values for the transfer banner', async () => {
+    const request = vi.fn().mockResolvedValue({ otp_messages: [] });
+    vi.stubGlobal('window', { waApi: { request } });
+
+    await getOtpMessages('waacc_1', '', { includeSensitiveValues: true, limit: 5 });
+
+    expect(request).toHaveBeenCalledWith({
+      path: '/api/wa/account-otp-messages?wa_account_id=waacc_1&limit=5&include_sensitive_values=true',
+      method: undefined,
+      timeoutMs: undefined,
+      body: undefined,
     });
   });
 });
