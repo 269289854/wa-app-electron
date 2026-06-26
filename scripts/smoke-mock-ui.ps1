@@ -147,7 +147,11 @@ const server = http.createServer(async (req, res) => {
       success: true,
       passed: true,
       status: 'ok',
-      method_statuses: [{ method: 'sms', available: true }],
+      method_statuses: [
+        { method: 'sms', available: true },
+        { method: 'voice', available: false },
+        { method: 'wa_old', available: true, cooldown_seconds: 30 },
+      ],
       phone_status: { sms_available: true },
     });
     if (path === '/api/wa/register') return json(res, { success: true, status: 'otp_required', wa_account_id: body.e164_number === '+573145865572' ? platformAccountID : accountID, verification_request_id: verificationRequestID, delivery_method: body.delivery_method || 'sms', retry_after_seconds: 12, account_transfer_challenge: body.delivery_method === 'wa_old' ? { type: 'wa_old' } : undefined });
@@ -541,6 +545,21 @@ async function main() {
     `);
     await waitForOperationWithDebug(client, '/api/wa/phone/sms-probe');
     await waitForOperationWithDebug(client, '/api/wa/register');
+    await runInPage(client, `
+      const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
+      const channels = Object.fromEntries([...addPage.querySelectorAll('[data-channel]')].map((item) => [item.dataset.channel, item.dataset.state]));
+      for (const code of ['sms', 'voice', 'wa_old', 'email_otp', 'send_sms', 'flash']) {
+        if (!channels[code]) throw new Error('Missing channel state for ' + code + ': ' + JSON.stringify(channels));
+      }
+      if (channels.sms !== 'available') throw new Error('SMS should be available: ' + JSON.stringify(channels));
+      if (channels.voice !== 'unavailable') throw new Error('Voice should be unavailable: ' + JSON.stringify(channels));
+      if (channels.wa_old !== 'cooldown') throw new Error('wa_old should be cooling down: ' + JSON.stringify(channels));
+      if (channels.flash !== 'unsupported') throw new Error('flash should be unsupported: ' + JSON.stringify(channels));
+      const options = [...addPage.querySelectorAll('select option')].map((option) => ({ value: option.value, disabled: option.disabled }));
+      if (options.some((option) => option.value === 'flash')) throw new Error('Unsupported flash option should not be selectable');
+      if (!options.find((option) => option.value === 'voice')?.disabled) throw new Error('Unavailable voice option should be disabled');
+      return true;
+    `);
     checks.combinedRegistrationLayout = true;
     const operationsBeforeRegistrationOtp = (await getOperations()).length;
     await runInPage(client, `
@@ -592,6 +611,18 @@ async function main() {
     await waitForOperationWithDebug(client, '/api/wa/phone/sms-probe', 'POST', 15000, operationsBeforeSplitProbe);
     const splitProbeOperations = (await getOperations()).slice(operationsBeforeSplitProbe);
     if (splitProbeOperations.some((operation) => operation.path === '/api/wa/register')) throw new Error('Split probe unexpectedly started registration');
+    await runInPage(client, `
+      const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
+      let voice;
+      for (let index = 0; index < 40; index += 1) {
+        const select = addPage.querySelector('select');
+        voice = [...select.options].find((option) => option.value === 'voice');
+        if (voice?.disabled && addPage.querySelector('[data-channel="voice"]')?.dataset.state === 'unavailable') break;
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      if (!voice || !voice.disabled) throw new Error('Unavailable voice option should be disabled after split probe');
+      return true;
+    `);
     const operationsBeforeSplitRegister = (await getOperations()).length;
     await runInPage(client, `
       const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);

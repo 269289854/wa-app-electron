@@ -73,7 +73,7 @@ import {
 } from './api';
 import { accountDisplayStatus, connectionRank, connectionView, isRegistrationPending, type LongConnectionRecord } from './wa-status';
 import { normalizePhoneInput } from './phone-input';
-import { probeStatus, registrationMethods, statusReason } from './result-model';
+import { formatDuration, probeStatus, registrationChannelStates, registrationMethodAvailability, registrationMethods, statusReason } from './result-model';
 import { normalizeOpenAIPhoneCheckResult } from './openai-phone-check';
 import { countryDisplayName, filterSMSBowerCountries, normalizeSMSBowerCountries, type SMSBowerCountry } from './smsbower-countries';
 import type { AccountMessage, ClientProfile, WAAccount, WorkflowResponse } from './types';
@@ -1093,7 +1093,13 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
   const registrationLayout = configQuery.data?.registrationActionLayout || 'combined';
   const splitRegistrationLayout = registrationLayout === 'split';
   const lastProbeStatus = lastProbe ? probeStatus(lastProbe.response) : null;
-  const canRegisterFromProbe = Boolean(lastProbe && lastProbe.key === currentRegistrationKey && lastProbeStatus?.canRegister);
+  const currentProbeMatchesInput = Boolean(lastProbe && lastProbe.key === currentRegistrationKey);
+  const channelStatus = currentProbeMatchesInput && lastProbeStatus ? lastProbeStatus : status;
+  const channelProbed = currentProbeMatchesInput || Boolean(probe);
+  const channelStates = registrationChannelStates({ methods: channelStatus.methods, probed: channelProbed });
+  const selectedMethodAvailability = registrationMethodAvailability(channelStatus, method, channelProbed);
+  const lastProbeMethodAvailability = lastProbeStatus ? registrationMethodAvailability(lastProbeStatus, method, true) : { available: false, reason: '请先探测号码' };
+  const canRegisterFromProbe = Boolean(currentProbeMatchesInput && lastProbeMethodAvailability.available);
   const updatePhoneInput = (value: string) => {
     setPhone(value);
     const normalized = normalizePhoneInput(value, countryCallingCode);
@@ -1337,8 +1343,9 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
   const registerManualPhone = async (phoneInput: PhoneInput, verifiedProbe?: WorkflowResponse) => {
     const probeForCurrentInput = verifiedProbe || (lastProbe?.key === registrationInputKey(phoneInput, method) ? lastProbe.response : probe);
     const probeResultStatus = probeStatus(probeForCurrentInput);
-    if (!probeResultStatus.canRegister) {
-      throw new Error(statusReason(probeResultStatus) || '请先探测号码，探测通过后再发起注册。');
+    const methodAvailability = registrationMethodAvailability(probeResultStatus, method, Boolean(probeForCurrentInput));
+    if (!probeResultStatus.canRegister || !methodAvailability.available) {
+      throw new Error(methodAvailability.reason || statusReason(probeResultStatus) || '请先探测号码，探测通过后再发起注册。');
     }
     const smsbowerConfig = configQuery.data?.smsbower || (await window.waConfig.get()).smsbower;
     const openAIResult = await checkOpenAIPhoneForSMSBower(phoneInput, setDebugExchanges, smsbowerConfig.openAIPhoneCheckEnabled);
@@ -1417,8 +1424,9 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
       const phoneInput = requirePhone(input);
       const probeResponse = await probePhoneForManualRegistration(phoneInput, { resetDebug: true });
       const probeResultStatus = probeStatus(probeResponse);
-      if (!probeResultStatus.canRegister) {
-        throw new Error(statusReason(probeResultStatus) || '探测未通过，未发起注册。');
+      const methodAvailability = registrationMethodAvailability(probeResultStatus, method, true);
+      if (!probeResultStatus.canRegister || !methodAvailability.available) {
+        throw new Error(methodAvailability.reason || statusReason(probeResultStatus) || '探测未通过，未发起注册。');
       }
       return registerManualPhone(phoneInput, probeResponse);
     },
@@ -1464,14 +1472,15 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
   const transferVisible = method === 'wa_old' || Boolean(probe?.account_transfer_challenge);
   const addAccountBusy = probeOnlyMutation.isPending || registerAfterProbeMutation.isPending || probeAndRegisterMutation.isPending || otpMutation.isPending || platformBusy;
   const lastProbeFailureReason = lastProbeStatus && !lastProbeStatus.canRegister ? statusReason(lastProbeStatus) : '';
+  const selectedMethodHint = probe && !selectedMethodAvailability.available ? selectedMethodAvailability.reason : '';
   const splitRegisterDisabledReason = !input
     ? '请输入手机号和国家拨号码。'
     : !lastProbe
       ? '请先探测号码。'
       : lastProbe.key !== currentRegistrationKey
         ? '当前号码或注册通道已变更，请重新探测。'
-        : !lastProbeStatus?.canRegister
-          ? lastProbeFailureReason || '探测未通过，不能发起注册。'
+        : !lastProbeStatus?.canRegister || !lastProbeMethodAvailability.available
+          ? lastProbeMethodAvailability.reason || lastProbeFailureReason || '探测未通过，不能发起注册。'
           : '';
   const transferRefreshMutation = useMutation({
     mutationFn: () => {
@@ -1549,20 +1558,22 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
             <label>
               注册通道
               <select value={method} onChange={(event) => setMethod(event.target.value)} disabled={addAccountBusy}>
-                {registrationMethods.map((item) => <option value={item.code} key={item.code}>{item.label}</option>)}
+                {registrationMethods.map((item) => {
+                  const availability = registrationMethodAvailability(status, item.code, Boolean(probe));
+                  return <option value={item.code} key={item.code} disabled={Boolean(probe) && !availability.available}>{item.label}{probe && !availability.available ? ` - ${availability.reason}` : ''}</option>;
+                })}
               </select>
             </label>
             <StatusCallout tone={status.tone} title={status.label} detail={statusReason(status) || '完成号码探测后会显示通道状态。'} />
-            {status.methods.length ? (
-              <div className="method-grid">
-                {status.methods.map((item) => (
-                  <span className={item.available === true && !item.waitSeconds ? 'ok' : item.waitSeconds ? 'warn' : 'idle'} key={item.code}>
-                    {item.label}
-                    <small>{item.waitSeconds ? `冷却 ${item.waitSeconds}s` : item.available === true ? '可用' : '未知'}</small>
-                  </span>
-                ))}
-              </div>
-            ) : null}
+            <div className="method-grid">
+              {channelStates.map((item) => (
+                <span className={item.tone} key={item.code} title={item.reason} data-channel={item.code} data-state={item.state}>
+                  {item.label}
+                  <small>{channelStateLabel(item)}</small>
+                </span>
+              ))}
+            </div>
+            {selectedMethodHint ? <span className="field-hint">{selectedMethodHint}</span> : null}
             <div className="inline-actions">
               {splitRegistrationLayout ? (
                 <>
@@ -1576,7 +1587,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
                   </button>
                 </>
               ) : (
-                <button className="primary-button" disabled={addAccountBusy} onClick={() => probeAndRegisterMutation.mutate()}>
+                <button className="primary-button" disabled={addAccountBusy || Boolean(probe && !selectedMethodAvailability.available)} onClick={() => probeAndRegisterMutation.mutate()}>
                   {probeAndRegisterMutation.isPending ? <Loader2 className="spin" size={15} /> : <Send size={15} />}
                   {addAccountStage === 'probe' ? '探测中...' : addAccountStage === 'register' ? '注册请求中...' : '探测并发起注册'}
                 </button>
@@ -2633,6 +2644,14 @@ function requirePhone(input: PhoneInput | null) {
 
 function registrationInputKey(input: PhoneInput, method: string) {
   return `${input.e164_number}|${input.country_calling_code}|${input.country_iso2}|${method}`;
+}
+
+function channelStateLabel(channel: ReturnType<typeof registrationChannelStates>[number]) {
+  if (channel.state === 'cooldown' && channel.waitSeconds) return `冷却 ${formatDuration(channel.waitSeconds)}`;
+  if (channel.state === 'available') return '可用';
+  if (channel.state === 'unavailable') return '不可用';
+  if (channel.state === 'unsupported') return '不支持';
+  return '需检测';
 }
 
 function mergeAccounts(current: WAAccount[], next: WAAccount[]) {

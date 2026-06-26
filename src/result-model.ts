@@ -12,6 +12,16 @@ export type ProbeStatus = {
   reason: string;
   methods: Array<{ code: string; label: string; available?: boolean; waitSeconds: number | null }>;
 };
+export type RegistrationChannelState = {
+  code: string;
+  label: string;
+  requestable: boolean;
+  state: 'needs_probe' | 'available' | 'unavailable' | 'cooldown' | 'unsupported';
+  available: boolean;
+  waitSeconds: number | null;
+  tone: 'ok' | 'warn' | 'bad' | 'idle';
+  reason: string;
+};
 
 const methodMap: Record<string, string> = {
   sms: 'SMS',
@@ -34,6 +44,10 @@ export const registrationMethods = [
   { code: 'wa_old', label: '旧设备' },
   { code: 'email_otp', label: '邮箱' },
   { code: 'send_sms', label: '发送 SMS 至 WA' },
+];
+export const visibleRegistrationChannels = [
+  ...registrationMethods.map((method) => ({ ...method, requestable: true })),
+  { code: 'flash', label: '未接来电', requestable: false },
 ];
 
 export function probeStatus(result?: WorkflowResponse | null): ProbeStatus {
@@ -59,7 +73,8 @@ export function probeStatus(result?: WorkflowResponse | null): ProbeStatus {
   const smsAvailable = boolValue(phoneStatus.sms_available, phoneStatus.can_receive_sms, smsProbe.sms_available, smsProbe.can_send_sms, accountProbe.can_send_sms);
   const requestFailed = Boolean(result.success === false || result.request_failed || textHas(['network', 'proxy', 'unreachable', 'invalid_skey', 'bad_token', 'missing_param', 'bad_param'], result.error_message, result.status));
   const methods = methodStatuses(phoneStatus.method_statuses, accountProbe.method_statuses, result.method_statuses, record(result.verification_request).method_statuses);
-  const hasAvailableMethod = methods.some((method) => method.available === true && !method.waitSeconds);
+  const channels = registrationChannelStates({ methods, probed: true });
+  const hasAvailableMethod = channels.some((channel) => channel.requestable && channel.available);
   const canRegister = !blocked && !requestFailed && flow !== 'invalid_number' && flow !== 'rate_limited' && (hasAvailableMethod || smsAvailable === true);
   const reason = reasonLabel(textValue(result.error_message, result.reject_reason, phoneStatus.account_raw_reason, accountProbe.raw_reason, accountProbe.error_message, result.status));
   if (blocked) return { label: '号码封禁', tone: 'bad', canRegister: false, blocked: true, requestFailed, accountFlow: flow, smsAvailable, waitSeconds, reason: reason || '号码被 WA 拒绝或封禁', methods };
@@ -70,8 +85,41 @@ export function probeStatus(result?: WorkflowResponse | null): ProbeStatus {
   return { label: '等待可用通道', tone: 'idle', canRegister, blocked: false, requestFailed, accountFlow: flow, smsAvailable, waitSeconds, reason, methods };
 }
 
+export function registrationChannelStates(input: { methods: ProbeStatus['methods']; probed: boolean }): RegistrationChannelState[] {
+  return visibleRegistrationChannels.map((channel) => {
+    const method = input.methods.find((item) => normalizedMethodCode(item.code) === channel.code);
+    if (!channel.requestable) {
+      return { ...channel, state: 'unsupported', available: false, waitSeconds: null, tone: 'idle', reason: '当前客户端暂不支持该通道发起注册' };
+    }
+    if (!input.probed) {
+      return { ...channel, state: 'needs_probe', available: false, waitSeconds: null, tone: 'idle', reason: '请先探测号码' };
+    }
+    const waitSeconds = method?.waitSeconds ?? null;
+    if (waitSeconds && waitSeconds > 0) {
+      return { ...channel, state: 'cooldown', available: false, waitSeconds, tone: 'warn', reason: `冷却 ${formatDuration(waitSeconds)}` };
+    }
+    if (method?.available === true) {
+      return { ...channel, state: 'available', available: true, waitSeconds: null, tone: 'ok', reason: '可用' };
+    }
+    return { ...channel, state: 'unavailable', available: false, waitSeconds: null, tone: 'bad', reason: '当前通道不可用' };
+  });
+}
+
+export function registrationChannelState(status: ProbeStatus, code: string, probed: boolean) {
+  return registrationChannelStates({ methods: status.methods, probed }).find((channel) => channel.code === normalizedMethodCode(code));
+}
+
+export function registrationMethodAvailability(status: ProbeStatus, code: string, probed: boolean) {
+  const channel = registrationChannelState(status, code, probed);
+  if (!channel) return { available: false, reason: '未知注册通道' };
+  if (!channel.requestable) return { available: false, reason: `${channel.label}暂不支持发起注册` };
+  if (!probed) return { available: false, reason: '请先探测号码' };
+  if (channel.available) return { available: true, reason: '' };
+  return { available: false, reason: channel.reason || '当前通道不可用，请选择可用通道' };
+}
+
 export function methodLabel(code: string) {
-  const normalized = code.trim().toLowerCase().replace(/^verification_delivery_method_/, '').replace(/^registration_login_method_/, '');
+  const normalized = normalizedMethodCode(code);
   return methodMap[normalized] || normalized.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
@@ -153,21 +201,29 @@ function addMethod(seen: Map<string, { code: string; label: string; available?: 
   if (typeof value === 'string') {
     for (const part of value.split(',')) {
       const code = part.trim();
-      if (code) seen.set(code.toLowerCase(), { code, label: methodLabel(code), available: true, waitSeconds: null });
+      if (code) seen.set(normalizedMethodCode(code), { code: normalizedMethodCode(code), label: methodLabel(code), available: true, waitSeconds: null });
     }
     return;
   }
   const item = record(value);
   const code = textValue(item.method, item.delivery_method, item.name, item.type);
   if (!code) return;
-  const key = code.toLowerCase();
+  const key = normalizedMethodCode(code);
   const previous = seen.get(key);
   seen.set(key, {
-    code,
+    code: key,
     label: methodLabel(code),
     available: previous?.available ?? boolValue(item.available, item.eligible, item.enabled),
     waitSeconds: numberValue(item.cooldown_seconds, item.wait_seconds, item.retry_after_seconds, previous?.waitSeconds),
   });
+}
+
+function normalizedMethodCode(code: string) {
+  const normalized = code.trim().toLowerCase().replace(/^verification_delivery_method_/, '').replace(/^registration_login_method_/, '').replaceAll('-', '_');
+  if (normalized === 'old_wa') return 'wa_old';
+  if (normalized === 'email') return 'email_otp';
+  if (normalized === 'send_sms_to_wa') return 'send_sms';
+  return normalized;
 }
 
 function reasonLabel(value: string) {
