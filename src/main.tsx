@@ -1068,6 +1068,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
   const [countryCallingCode, setCountryCallingCode] = useState('');
   const [phone, setPhone] = useState('');
   const [probe, setProbe] = useState<WorkflowResponse | null>(null);
+  const [lastProbe, setLastProbe] = useState<{ key: string; response: WorkflowResponse } | null>(null);
   const [debugExchanges, setDebugExchanges] = useState<DebugExchange[]>([]);
   const [addAccountStage, setAddAccountStage] = useState<'idle' | 'probe' | 'register'>('idle');
   const [platformState, setPlatformState] = useState<SMSBowerRunState>({
@@ -1086,8 +1087,13 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
   const [pendingVerificationRequestID, setPendingVerificationRequestID] = useState('');
   const [otp, setOtp] = useState('');
   const input = resolvePhoneInput(phone, countryCallingCode);
+  const currentRegistrationKey = input ? registrationInputKey(input, method) : '';
   const recognizedPhone = input?.country_iso2 ? `${input.country_iso2} +${input.country_calling_code}` : '';
   const status = probeStatus(probe);
+  const registrationLayout = configQuery.data?.registrationActionLayout || 'combined';
+  const splitRegistrationLayout = registrationLayout === 'split';
+  const lastProbeStatus = lastProbe ? probeStatus(lastProbe.response) : null;
+  const canRegisterFromProbe = Boolean(lastProbe && lastProbe.key === currentRegistrationKey && lastProbeStatus?.canRegister);
   const updatePhoneInput = (value: string) => {
     setPhone(value);
     const normalized = normalizePhoneInput(value, countryCallingCode);
@@ -1307,74 +1313,116 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
     stopPlatformRef.current = true;
     setPlatformState((state) => ({ ...state, stopping: true, message: 'Stopping after current request' }));
   }, []);
+  const probePhoneForManualRegistration = async (phoneInput: PhoneInput, options: { resetDebug: boolean }) => {
+    const probeExchange = debugRequest('探测号码', '/api/wa/phone/sms-probe', phoneInput);
+    setAddAccountStage('probe');
+    if (options.resetDebug) setDebugExchanges([probeExchange]);
+    else appendDebugExchange(setDebugExchanges, probeExchange);
+    try {
+      const probeResponse = await probePhoneSMS(phoneInput);
+      setProbe(probeResponse);
+      setLastProbe({ key: registrationInputKey(phoneInput, method), response: probeResponse });
+      const patchedExchange = { ...probeExchange, response: sanitizeDebugValue(probeResponse) };
+      if (options.resetDebug) setDebugExchanges([patchedExchange]);
+      else patchDebugExchange(setDebugExchanges, probeExchange, patchedExchange);
+      return probeResponse;
+    } catch (error) {
+      setLastProbe(null);
+      const patchedExchange = { ...probeExchange, error: debugError(error) };
+      if (options.resetDebug) setDebugExchanges([patchedExchange]);
+      else patchDebugExchange(setDebugExchanges, probeExchange, patchedExchange);
+      throw error;
+    }
+  };
+  const registerManualPhone = async (phoneInput: PhoneInput, verifiedProbe?: WorkflowResponse) => {
+    const probeForCurrentInput = verifiedProbe || (lastProbe?.key === registrationInputKey(phoneInput, method) ? lastProbe.response : probe);
+    const probeResultStatus = probeStatus(probeForCurrentInput);
+    if (!probeResultStatus.canRegister) {
+      throw new Error(statusReason(probeResultStatus) || '请先探测号码，探测通过后再发起注册。');
+    }
+    const smsbowerConfig = configQuery.data?.smsbower || (await window.waConfig.get()).smsbower;
+    const openAIResult = await checkOpenAIPhoneForSMSBower(phoneInput, setDebugExchanges, smsbowerConfig.openAIPhoneCheckEnabled);
+    if (openAIResult.status === 'used') {
+      appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check blocked registration', {
+        phoneNumber: phoneInput.e164_number,
+        result: openAIResult,
+      }));
+      throw new Error('openai \u624b\u673a\u53f7\u5df2\u88ab\u4f7f\u7528');
+    }
+    if (openAIResult.status === 'rate_limited') {
+      appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check rate limited', {
+        phoneNumber: phoneInput.e164_number,
+        result: openAIResult,
+      }));
+      throw new Error(openAIResult.message);
+    }
+    if (openAIResult.status === 'session_expired') {
+      appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check session expired', {
+        phoneNumber: phoneInput.e164_number,
+        result: openAIResult,
+      }));
+      throw new Error(openAIResult.message);
+    }
+    if (openAIResult.status === 'error') {
+      appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check failed', {
+        phoneNumber: phoneInput.e164_number,
+        result: openAIResult,
+      }));
+      throw new Error(openAIResult.message || 'OpenAI phone check failed');
+    }
+    const registerBody = { ...phoneInput, delivery_method: method };
+    const registerExchange = debugRequest('发起注册', '/api/wa/register', registerBody);
+    setAddAccountStage('register');
+    setDebugExchanges((items) => [...items, registerExchange]);
+    try {
+      const registerResponse = await registerPhone(phoneInput, method);
+      setDebugExchanges((items) => replaceDebugExchange(items, registerExchange, { ...registerExchange, response: sanitizeDebugValue(registerResponse) }));
+      return registerResponse;
+    } catch (error) {
+      setDebugExchanges((items) => replaceDebugExchange(items, registerExchange, { ...registerExchange, error: debugError(error) }));
+      throw error;
+    }
+  };
+  const applyManualRegisterResponse = (registerResponse: WorkflowResponse) => {
+    setProbe(registerResponse);
+    if (registerResponse.wa_account_id) setPendingAccountID(registerResponse.wa_account_id);
+    setPendingVerificationRequestID(registerResponse.verification_request_id || '');
+    notify(registerResponse.success === false || registerResponse.error_message ? 'error' : 'success', registerResponse.error_message || '注册请求已提交');
+    onChanged();
+  };
+  const probeOnlyMutation = useMutation({
+    mutationFn: async () => {
+      const phoneInput = requirePhone(input);
+      return probePhoneForManualRegistration(phoneInput, { resetDebug: true });
+    },
+    onSuccess: (probeResponse) => {
+      const probeResultStatus = probeStatus(probeResponse);
+      notify(probeResultStatus.canRegister ? 'success' : 'error', statusReason(probeResultStatus) || (probeResultStatus.canRegister ? '号码探测通过' : '号码探测未通过'));
+    },
+    onError: (error) => notify('error', errorMessage(error)),
+    onSettled: () => setAddAccountStage('idle'),
+  });
+  const registerAfterProbeMutation = useMutation({
+    mutationFn: async () => {
+      const phoneInput = requirePhone(input);
+      if (!canRegisterFromProbe) throw new Error('请先探测当前号码，探测通过后再发起注册。');
+      return registerManualPhone(phoneInput);
+    },
+    onSuccess: applyManualRegisterResponse,
+    onError: (error) => notify('error', errorMessage(error)),
+    onSettled: () => setAddAccountStage('idle'),
+  });
   const probeAndRegisterMutation = useMutation({
     mutationFn: async () => {
       const phoneInput = requirePhone(input);
-      const probeExchange = debugRequest('探测号码', '/api/wa/phone/sms-probe', phoneInput);
-      setAddAccountStage('probe');
-      setDebugExchanges([probeExchange]);
-      let probeResponse: WorkflowResponse;
-      try {
-        probeResponse = await probePhoneSMS(phoneInput);
-        setDebugExchanges([{ ...probeExchange, response: sanitizeDebugValue(probeResponse) }]);
-      } catch (error) {
-        setDebugExchanges([{ ...probeExchange, error: debugError(error) }]);
-        throw error;
-      }
+      const probeResponse = await probePhoneForManualRegistration(phoneInput, { resetDebug: true });
       const probeResultStatus = probeStatus(probeResponse);
       if (!probeResultStatus.canRegister) {
         throw new Error(statusReason(probeResultStatus) || '探测未通过，未发起注册。');
       }
-      const smsbowerConfig = configQuery.data?.smsbower || (await window.waConfig.get()).smsbower;
-      const openAIResult = await checkOpenAIPhoneForSMSBower(phoneInput, setDebugExchanges, smsbowerConfig.openAIPhoneCheckEnabled);
-      if (openAIResult.status === 'used') {
-        appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check blocked registration', {
-          phoneNumber: phoneInput.e164_number,
-          result: openAIResult,
-        }));
-        throw new Error('openai \u624b\u673a\u53f7\u5df2\u88ab\u4f7f\u7528');
-      }
-      if (openAIResult.status === 'rate_limited') {
-        appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check rate limited', {
-          phoneNumber: phoneInput.e164_number,
-          result: openAIResult,
-        }));
-        throw new Error(openAIResult.message);
-      }
-      if (openAIResult.status === 'session_expired') {
-        appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check session expired', {
-          phoneNumber: phoneInput.e164_number,
-          result: openAIResult,
-        }));
-        throw new Error(openAIResult.message);
-      }
-      if (openAIResult.status === 'error') {
-        appendDebugExchange(setDebugExchanges, debugInfo('OpenAI phone check failed', {
-          phoneNumber: phoneInput.e164_number,
-          result: openAIResult,
-        }));
-        throw new Error(openAIResult.message || 'OpenAI phone check failed');
-      }
-      const registerBody = { ...phoneInput, delivery_method: method };
-      const registerExchange = debugRequest('发起注册', '/api/wa/register', registerBody);
-      setAddAccountStage('register');
-      setDebugExchanges((items) => [...items, registerExchange]);
-      try {
-        const registerResponse = await registerPhone(phoneInput, method);
-        setDebugExchanges((items) => replaceDebugExchange(items, registerExchange, { ...registerExchange, response: sanitizeDebugValue(registerResponse) }));
-        return { registerResponse };
-      } catch (error) {
-        setDebugExchanges((items) => replaceDebugExchange(items, registerExchange, { ...registerExchange, error: debugError(error) }));
-        throw error;
-      }
+      return registerManualPhone(phoneInput, probeResponse);
     },
-    onSuccess: ({ registerResponse }) => {
-      setProbe(registerResponse);
-      if (registerResponse.wa_account_id) setPendingAccountID(registerResponse.wa_account_id);
-      setPendingVerificationRequestID(registerResponse.verification_request_id || '');
-      notify(registerResponse.success === false || registerResponse.error_message ? 'error' : 'success', registerResponse.error_message || '注册请求已提交');
-      onChanged();
-    },
+    onSuccess: applyManualRegisterResponse,
     onError: (error) => notify('error', errorMessage(error)),
     onSettled: () => setAddAccountStage('idle'),
   });
@@ -1414,7 +1462,17 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
   const platformCountryLabel = countryDisplayName(smsbowerCountriesQuery.data || [], smsConfig?.country || '');
   const platformBusy = platformRegisterMutation.isPending;
   const transferVisible = method === 'wa_old' || Boolean(probe?.account_transfer_challenge);
-  const addAccountBusy = probeAndRegisterMutation.isPending || otpMutation.isPending || platformBusy;
+  const addAccountBusy = probeOnlyMutation.isPending || registerAfterProbeMutation.isPending || probeAndRegisterMutation.isPending || otpMutation.isPending || platformBusy;
+  const lastProbeFailureReason = lastProbeStatus && !lastProbeStatus.canRegister ? statusReason(lastProbeStatus) : '';
+  const splitRegisterDisabledReason = !input
+    ? '请输入手机号和国家拨号码。'
+    : !lastProbe
+      ? '请先探测号码。'
+      : lastProbe.key !== currentRegistrationKey
+        ? '当前号码或注册通道已变更，请重新探测。'
+        : !lastProbeStatus?.canRegister
+          ? lastProbeFailureReason || '探测未通过，不能发起注册。'
+          : '';
   const transferRefreshMutation = useMutation({
     mutationFn: () => {
       if (!pendingVerificationRequestID) throw new Error('缺少 verification_request_id');
@@ -1506,11 +1564,25 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
               </div>
             ) : null}
             <div className="inline-actions">
-              <button className="primary-button" disabled={addAccountBusy} onClick={() => probeAndRegisterMutation.mutate()}>
-                {probeAndRegisterMutation.isPending ? <Loader2 className="spin" size={15} /> : <Send size={15} />}
-                {addAccountStage === 'probe' ? '探测中...' : addAccountStage === 'register' ? '注册请求中...' : '探测并发起注册'}
-              </button>
+              {splitRegistrationLayout ? (
+                <>
+                  <button className="secondary-button" data-action="probe-phone" disabled={addAccountBusy} onClick={() => probeOnlyMutation.mutate()}>
+                    {probeOnlyMutation.isPending ? <Loader2 className="spin" size={15} /> : <Search size={15} />}
+                    {addAccountStage === 'probe' && probeOnlyMutation.isPending ? '探测中...' : '探测号码'}
+                  </button>
+                  <button className="primary-button" data-action="register-after-probe" disabled={addAccountBusy || !canRegisterFromProbe} onClick={() => registerAfterProbeMutation.mutate()}>
+                    {registerAfterProbeMutation.isPending ? <Loader2 className="spin" size={15} /> : <Send size={15} />}
+                    {addAccountStage === 'register' && registerAfterProbeMutation.isPending ? '注册请求中...' : '发起注册'}
+                  </button>
+                </>
+              ) : (
+                <button className="primary-button" disabled={addAccountBusy} onClick={() => probeAndRegisterMutation.mutate()}>
+                  {probeAndRegisterMutation.isPending ? <Loader2 className="spin" size={15} /> : <Send size={15} />}
+                  {addAccountStage === 'probe' ? '探测中...' : addAccountStage === 'register' ? '注册请求中...' : '探测并发起注册'}
+                </button>
+              )}
             </div>
+            {splitRegistrationLayout && splitRegisterDisabledReason ? <span className="field-hint">{splitRegisterDisabledReason}</span> : null}
           </div>
         </InfoCard>
         <InfoCard title="OTP" icon={<KeyRound size={17} />}>
@@ -1595,7 +1667,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
         </InfoCard>
       ) : null}
       <InfoCard title="结果" icon={<MonitorCog size={17} />}>
-        <pre className="json-box debug-json">{JSON.stringify(debugExchanges.length ? debugExchanges : [{ hint: '点击“探测并发起注册”后，这里会显示请求和应答链路。' }], null, 2)}</pre>
+        <pre className="json-box debug-json">{JSON.stringify(debugExchanges.length ? debugExchanges : [{ hint: splitRegistrationLayout ? '点击“探测号码”或“发起注册”后，这里会显示请求和应答链路。' : '点击“探测并发起注册”后，这里会显示请求和应答链路。' }], null, 2)}</pre>
       </InfoCard>
     </section>
   );
@@ -1643,6 +1715,7 @@ type SettingsForm = {
   localDeviceProfilesFile: string;
   autoStartLocalService: boolean;
   smsCancelQueuePollIntervalSeconds: number;
+  registrationActionLayout: RegistrationActionLayout;
   password: string;
   smsProvider: SMSProvider;
   smsbowerApiKey: string;
@@ -2129,6 +2202,7 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
     localDeviceProfilesFile: '',
     autoStartLocalService: false,
     smsCancelQueuePollIntervalSeconds: 5,
+    registrationActionLayout: 'combined',
     password: '',
     smsProvider: 'smsbower',
     smsbowerApiKey: '',
@@ -2163,6 +2237,7 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
       localDeviceProfilesFile: configQuery.data.localDeviceProfilesFile,
       autoStartLocalService: configQuery.data.autoStartLocalService,
       smsCancelQueuePollIntervalSeconds: configQuery.data.smsCancelQueuePollIntervalSeconds,
+      registrationActionLayout: configQuery.data.registrationActionLayout,
       smsProvider: configQuery.data.smsProvider,
       smsbower: {
         enabled: configQuery.data.smsbower.enabled,
@@ -2258,6 +2333,13 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
             <label>
               取消队列扫描间隔（秒）
               <input value={form.smsCancelQueuePollIntervalSeconds} onChange={(event) => setForm({ ...form, smsCancelQueuePollIntervalSeconds: Number(event.target.value) })} type="number" min="1" max="300" />
+            </label>
+            <label>
+              添加账号操作布局
+              <select data-field="registration-action-layout" value={form.registrationActionLayout} onChange={(event) => setForm({ ...form, registrationActionLayout: event.target.value as RegistrationActionLayout })}>
+                <option value="combined">合并：探测并发起注册</option>
+                <option value="split">拆分：探测号码 / 发起注册</option>
+              </select>
             </label>
             <SMSBowerSettingsFields
               form={form}
@@ -2547,6 +2629,10 @@ function resolvePhoneInput(phone: string, countryCallingCode: string): PhoneInpu
 function requirePhone(input: PhoneInput | null) {
   if (!input) throw new Error('请输入手机号和国家拨号码');
   return input;
+}
+
+function registrationInputKey(input: PhoneInput, method: string) {
+  return `${input.e164_number}|${input.country_calling_code}|${input.country_iso2}|${method}`;
 }
 
 function mergeAccounts(current: WAAccount[], next: WAAccount[]) {

@@ -38,6 +38,7 @@ describe('config store', () => {
       localDeviceProfilesFile: 'C:/wa/device_profiles.json',
       autoStartLocalService: true,
       smsCancelQueuePollIntervalSeconds: 12,
+      registrationActionLayout: 'split' as const,
       smsProvider: 'hero-sms' as const,
       smsbower: { ...defaultConfig('C:/data').smsbower, enabled: true, country: '187', maxPrice: 0.5 },
       windowState: { width: 1400, height: 900, x: 10, y: 20, maximized: true },
@@ -53,6 +54,7 @@ describe('config store', () => {
       localDeviceProfilesFile: 'C:/wa/device_profiles.json',
       autoStartLocalService: true,
       smsCancelQueuePollIntervalSeconds: 12,
+      registrationActionLayout: 'split',
       smsProvider: 'hero-sms',
     });
     expect(loaded.smsbower).toMatchObject({ enabled: true, country: '187', maxPrice: 0.5 });

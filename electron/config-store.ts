@@ -56,6 +56,9 @@ export class ConfigStore {
     if (values.has('smsCancelQueuePollIntervalSeconds')) {
       partial.smsCancelQueuePollIntervalSeconds = Number(values.get('smsCancelQueuePollIntervalSeconds'));
     }
+    if (values.has('registrationActionLayout')) {
+      partial.registrationActionLayout = values.get('registrationActionLayout') === 'split' ? 'split' : 'combined';
+    }
     if (values.has('smsProvider')) {
       partial.smsProvider = (values.get('smsProvider') === 'hero-sms' ? 'hero-sms' : 'smsbower') as SMSProvider;
     }
@@ -85,6 +88,7 @@ export class ConfigStore {
       this.upsert('localDeviceProfilesFile', n.localDeviceProfilesFile, now);
       this.upsert('autoStartLocalService', n.autoStartLocalService ? '1' : '0', now);
       this.upsert('smsCancelQueuePollIntervalSeconds', String(n.smsCancelQueuePollIntervalSeconds), now);
+      this.upsert('registrationActionLayout', n.registrationActionLayout, now);
       this.upsert('smsProvider', n.smsProvider, now);
       this.upsert('smsbower', JSON.stringify(n.smsbower), now);
       this.upsert('windowState', JSON.stringify(n.windowState), now);

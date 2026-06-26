@@ -2,6 +2,7 @@
 
 type ClientMode = 'remote' | 'local';
 type SMSProvider = 'smsbower' | 'hero-sms';
+type RegistrationActionLayout = 'combined' | 'split';
 
 type ClientConfig = {
   mode: ClientMode;
@@ -12,6 +13,7 @@ type ClientConfig = {
   localDeviceProfilesFile: string;
   autoStartLocalService: boolean;
   smsCancelQueuePollIntervalSeconds: number;
+  registrationActionLayout: RegistrationActionLayout;
   smsProvider: SMSProvider;
   smsbower: SMSBowerPublicConfig;
   hasPassword: boolean;

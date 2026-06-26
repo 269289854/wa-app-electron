@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 
 export type ClientMode = 'remote' | 'local';
+export type RegistrationActionLayout = 'combined' | 'split';
 
 export type ClientConfig = {
   mode: ClientMode;
@@ -11,6 +12,7 @@ export type ClientConfig = {
   localDeviceProfilesFile: string;
   autoStartLocalService: boolean;
   smsCancelQueuePollIntervalSeconds: number;
+  registrationActionLayout: RegistrationActionLayout;
   smsProvider: SMSProvider;
   smsbower: SMSBowerPublicConfig;
   hasPassword: boolean;
@@ -78,6 +80,7 @@ export function defaultConfig(userDataDir: string): StoredConfig {
     localDeviceProfilesFile: '',
     autoStartLocalService: false,
     smsCancelQueuePollIntervalSeconds: 5,
+    registrationActionLayout: 'combined',
     smsProvider: 'smsbower',
     smsbower: defaultSMSBowerConfig(),
     windowState: { width: 1320, height: 860 },
@@ -96,6 +99,7 @@ export function normalizeConfig(config: Partial<StoredConfig>, userDataDir: stri
     localDeviceProfilesFile: String(config.localDeviceProfilesFile || '').trim(),
     autoStartLocalService: Boolean(config.autoStartLocalService),
     smsCancelQueuePollIntervalSeconds: boundedNumber(config.smsCancelQueuePollIntervalSeconds, 1, 300, 5),
+    registrationActionLayout: normalizeRegistrationActionLayout(config.registrationActionLayout),
     smsProvider: normalizeSMSProvider(config.smsProvider),
     smsbower: normalizeSMSBowerConfig(config.smsbower),
     encryptedPassword: config.encryptedPassword,
@@ -160,6 +164,7 @@ export function publicConfig(config: StoredConfig): ClientConfig {
     localDeviceProfilesFile: config.localDeviceProfilesFile,
     autoStartLocalService: config.autoStartLocalService,
     smsCancelQueuePollIntervalSeconds: config.smsCancelQueuePollIntervalSeconds,
+    registrationActionLayout: config.registrationActionLayout,
     smsProvider: config.smsProvider,
     smsbower,
     hasPassword,
@@ -194,6 +199,10 @@ export function publicSMSBowerConfig(config: SMSBowerStoredConfig, configuredPro
 
 export function normalizeSMSProvider(value: unknown): SMSProvider {
   return value === 'hero-sms' ? 'hero-sms' : 'smsbower';
+}
+
+export function normalizeRegistrationActionLayout(value: unknown): RegistrationActionLayout {
+  return value === 'split' ? 'split' : 'combined';
 }
 
 export function providerLabel(provider: SMSProvider) {

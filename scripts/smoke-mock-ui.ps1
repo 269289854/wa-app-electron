@@ -334,8 +334,8 @@ async function main() {
   const checks = {};
   try {
     checks.shell = await waitForExpression(client, 'Boolean(document.querySelector(".app-shell"))');
-    checks.config = await evaluate(client, 'window.waConfig.get().then((config) => ({ remoteBaseUrl: config.remoteBaseUrl, hasPassword: config.hasPassword }))');
-    if (checks.config.remoteBaseUrl !== expectedBaseUrl || !checks.config.hasPassword) throw new Error('Mock config was not applied');
+    checks.config = await evaluate(client, 'window.waConfig.get().then((config) => ({ remoteBaseUrl: config.remoteBaseUrl, hasPassword: config.hasPassword, registrationActionLayout: config.registrationActionLayout }))');
+    if (checks.config.remoteBaseUrl !== expectedBaseUrl || !checks.config.hasPassword || checks.config.registrationActionLayout !== 'combined') throw new Error('Mock config was not applied');
     await evaluate(client, 'window.waConfig.set({ smsbower: { openAIPhoneCheckEnabled: false } })');
     checks.accountRail = await waitForExpression(client, 'document.body.innerText.includes("Mock Account")');
     checks.connectionDot = await waitForExpression(client, 'Boolean(document.querySelector(".connection-dot.ok"))');
@@ -541,6 +541,7 @@ async function main() {
     `);
     await waitForOperationWithDebug(client, '/api/wa/phone/sms-probe');
     await waitForOperationWithDebug(client, '/api/wa/register');
+    checks.combinedRegistrationLayout = true;
     const operationsBeforeRegistrationOtp = (await getOperations()).length;
     await runInPage(client, `
       const setValue = (input, value) => {
@@ -566,6 +567,60 @@ async function main() {
     checks.registrationActions = true;
     const manualOtpOperation = (await getOperations()).slice(operationsBeforeRegistrationOtp).find((operation) => operation.path === '/api/wa/actions/registration/resume-otp');
     if (manualOtpOperation?.body?.verification_request_id !== 'wavrf-manual-1') throw new Error('Manual OTP submit did not include verification_request_id');
+    await evaluate(client, 'window.waConfig.set({ registrationActionLayout: "split", smsbower: { openAIPhoneCheckEnabled: false } })');
+    await evaluate(client, 'window.location.reload()');
+    await waitForExpression(client, 'Boolean(document.querySelector(".app-shell"))');
+    await route(client, '#/add', 'Boolean(document.querySelector(".app-shell[data-view=add] .add-page"))');
+    const operationsBeforeSplitProbe = (await getOperations()).length;
+    await runInPage(client, `
+      const setValue = (input, value) => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
+      const inputs = [...addPage.querySelectorAll('input')].filter((input) => input.offsetParent !== null);
+      setValue(inputs[0], '+1');
+      setValue(inputs[1], '4155550987');
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const probeButton = addPage.querySelector('[data-action="probe-phone"]');
+      const registerButton = addPage.querySelector('[data-action="register-after-probe"]');
+      if (!probeButton || probeButton.disabled) throw new Error('Split probe button is not ready');
+      if (!registerButton || !registerButton.disabled) throw new Error('Split register button should be disabled before probing');
+      probeButton.click();
+      return true;
+    `);
+    await waitForOperationWithDebug(client, '/api/wa/phone/sms-probe', 'POST', 15000, operationsBeforeSplitProbe);
+    const splitProbeOperations = (await getOperations()).slice(operationsBeforeSplitProbe);
+    if (splitProbeOperations.some((operation) => operation.path === '/api/wa/register')) throw new Error('Split probe unexpectedly started registration');
+    const operationsBeforeSplitRegister = (await getOperations()).length;
+    await runInPage(client, `
+      const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
+      let registerButton;
+      for (let index = 0; index < 40; index += 1) {
+        registerButton = addPage.querySelector('[data-action="register-after-probe"]');
+        if (registerButton && !registerButton.disabled) break;
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      if (!registerButton || registerButton.disabled) throw new Error('Split register button did not enable after probe');
+      registerButton.click();
+      return true;
+    `);
+    await waitForOperationWithDebug(client, '/api/wa/register', 'POST', 15000, operationsBeforeSplitRegister);
+    await runInPage(client, `
+      const setValue = (input, value) => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
+      const inputs = [...addPage.querySelectorAll('input')].filter((input) => input.offsetParent !== null);
+      const registerButton = addPage.querySelector('[data-action="register-after-probe"]');
+      setValue(inputs[1], '4155550000');
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      if (!registerButton.disabled) throw new Error('Split register button stayed enabled after phone changed');
+      return true;
+    `);
+    await evaluate(client, 'window.waConfig.set({ registrationActionLayout: "combined", smsbower: { openAIPhoneCheckEnabled: false } })');
+    checks.splitRegistrationLayout = true;
     const operationsBeforeTransfer = (await getOperations()).length;
     await runInPage(client, `
       const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
@@ -774,6 +829,7 @@ try {
     mode = "remote"
     remoteBaseUrl = $serverInfo.baseUrl
     password = "mock-password"
+    registrationActionLayout = "combined"
     smsProvider = "smsbower"
     smsbowerApiKey = "mock-smsbower-key"
     heroSMSApiKey = "mock-hero-sms-key"

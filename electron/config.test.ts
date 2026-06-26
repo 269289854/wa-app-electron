@@ -38,6 +38,7 @@ describe('electron config helpers', () => {
     expect(config.localDataDir).toContain('wa-app-data');
     expect(config.localCommonProxy).toBe('');
     expect(config.localDeviceProfilesFile).toBe('');
+    expect(config.registrationActionLayout).toBe('combined');
     expect(config.smsbower).toMatchObject({ enabled: false, targetSuccessCount: 1, maxOrders: 3, numberIntervalSeconds: 0, openAIPhoneCheckEnabled: false });
     expect(config.windowState).toEqual({ width: 1320, height: 860 });
   });
@@ -52,6 +53,7 @@ describe('electron config helpers', () => {
       localDeviceProfilesFile: ' C:/wa/device_profiles.json ',
       autoStartLocalService: 1 as unknown as boolean,
       smsCancelQueuePollIntervalSeconds: 999,
+      registrationActionLayout: 'split',
       windowState: { width: 9999, height: 12, maximized: true },
     }, 'C:/data');
 
@@ -64,7 +66,13 @@ describe('electron config helpers', () => {
     expect(config.localDeviceProfilesFile).toBe('C:/wa/device_profiles.json');
     expect(config.autoStartLocalService).toBe(true);
     expect(config.smsCancelQueuePollIntervalSeconds).toBe(300);
+    expect(config.registrationActionLayout).toBe('split');
     expect(config.windowState).toMatchObject({ width: 2400, height: 680, maximized: true });
+  });
+
+  it('falls back to the combined registration action layout for invalid values', () => {
+    expect(normalizeConfig({ ...defaultConfig('C:/data'), registrationActionLayout: 'split' }, 'C:/data').registrationActionLayout).toBe('split');
+    expect(normalizeConfig({ ...defaultConfig('C:/data'), registrationActionLayout: 'grid' as never }, 'C:/data').registrationActionLayout).toBe('combined');
   });
 
   it('keeps SMSBower decimal price bounds while normalizing integer limits', () => {
@@ -114,6 +122,7 @@ describe('electron config helpers', () => {
     const config = publicConfig({ ...defaultConfig('C:/data'), encryptedPassword: 'abc' });
     expect(config.hasPassword).toBe(true);
     expect(config.authPasswordRef).toBe(authPasswordRef);
+    expect(config.registrationActionLayout).toBe('combined');
     expect(JSON.stringify(config)).not.toContain('abc');
     expect('encryptedPassword' in config).toBe(false);
   });
