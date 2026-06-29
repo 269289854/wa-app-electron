@@ -37,6 +37,7 @@ import {
   accountID,
   accountTitle,
   assetDataUrl,
+  cleanupPendingRegistrationAccounts,
   contactAvatarPath,
   deleteAccount,
   deleteContact,
@@ -45,8 +46,10 @@ import {
   getClientProfiles,
   getConnections,
   getContacts,
+  getDashboardHealth,
   getMessages,
   getOtpMessages,
+  getPlayIntegrityStatus,
   getTwoFactorStatus,
   isTransientOTPSubmitError,
   markMessagesRead,
@@ -70,6 +73,7 @@ import {
   verifyEmailOtp,
   timestampValue,
   type PhoneInput,
+  type WaIntegrityMode,
 } from './api';
 import { accountDisplayStatus, connectionRank, connectionView, isRegistrationPending, type LongConnectionRecord } from './wa-status';
 import { normalizePhoneInput } from './phone-input';
@@ -167,6 +171,15 @@ function DesktopApp() {
     queryFn: () => window.smsCancelQueue.status(),
     refetchInterval: 5000,
   });
+  const cleanupPendingMutation = useMutation({
+    mutationFn: cleanupPendingRegistrationAccounts,
+    onSuccess: (result) => {
+      const deleted = Number(result.deleted_count || 0);
+      notify('success', deleted ? `已清理 ${deleted} 个等待验证码账号` : '没有需要清理的等待验证码账号');
+      refreshAccounts();
+    },
+    onError: (error) => notify('error', errorMessage(error)),
+  });
 
   useEffect(() => {
     if (!selectedAccountID && filteredAccounts[0]) setSelectedAccountID(accountID(filteredAccounts[0]));
@@ -203,6 +216,15 @@ function DesktopApp() {
         <button className="rail-action" onClick={() => setView('add')}>
           <Plus size={16} />
           添加账号
+        </button>
+        <button
+          className="secondary-button rail-cleanup-action"
+          data-action="cleanup-pending-registration"
+          disabled={!apiReady || cleanupPendingMutation.isPending}
+          onClick={() => window.confirm('确定清理所有等待验证码的账号？') && cleanupPendingMutation.mutate()}
+        >
+          {cleanupPendingMutation.isPending ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
+          清理等待验证码
         </button>
         <label className="rail-search">
           <Search size={15} />
@@ -282,6 +304,7 @@ function DesktopApp() {
                 notify={notify}
                 onAvatarChanged={() => setAccountAvatarVersion(String(Date.now()))}
                 onChanged={refreshAccounts}
+                accountCleanupBusy={cleanupPendingMutation.isPending}
               />
             </div>
             <div className="view-pane" hidden={view !== 'settings'}>
@@ -720,7 +743,7 @@ function copyText(text: string, notify: (kind: Toast['kind'], message: string) =
     .catch(() => notify('error', '复制失败'));
 }
 
-function AccountPanel({ account, avatarVersion, notify, onChanged, onAvatarChanged }: { account?: WAAccount; avatarVersion: string; notify: (kind: Toast['kind'], message: string) => void; onChanged: () => void; onAvatarChanged: () => void }) {
+function AccountPanel({ account, avatarVersion, notify, onChanged, onAvatarChanged, accountCleanupBusy = false }: { account?: WAAccount; avatarVersion: string; notify: (kind: Toast['kind'], message: string) => void; onChanged: () => void; onAvatarChanged: () => void; accountCleanupBusy?: boolean }) {
   const queryClient = useQueryClient();
   const accountId = accountID(account);
   const profilesQuery = useQuery({ queryKey: ['profiles', accountId], queryFn: () => getClientProfiles(accountId), enabled: Boolean(accountId), refetchInterval: 30000 });
@@ -746,8 +769,8 @@ function AccountPanel({ account, avatarVersion, notify, onChanged, onAvatarChang
           <p>{account.phone?.e164_number || accountId}</p>
           <span className={`status-pill ${displayStatus.tone}`}><Circle size={10} fill="currentColor" />{displayStatus.label}</span>
         </div>
-        <button className="danger-button" onClick={() => window.confirm('确定删除该账号？') && deleteMutation.mutate()}>
-          <Trash2 size={15} />
+        <button className="danger-button" disabled={accountCleanupBusy || deleteMutation.isPending} onClick={() => window.confirm('确定删除该账号？') && deleteMutation.mutate()}>
+          {deleteMutation.isPending ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
           删除账号
         </button>
       </div>
@@ -1065,12 +1088,18 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
     enabled: Boolean(configQuery.data?.smsbower.configured),
     staleTime: 60 * 60 * 1000,
   });
+  const healthQuery = useQuery({
+    queryKey: ['dashboard-health'],
+    queryFn: getDashboardHealth,
+    staleTime: 30000,
+  });
   const [countryCallingCode, setCountryCallingCode] = useState('');
   const [phone, setPhone] = useState('');
   const [probe, setProbe] = useState<WorkflowResponse | null>(null);
   const [lastProbe, setLastProbe] = useState<{ key: string; response: WorkflowResponse } | null>(null);
   const [debugExchanges, setDebugExchanges] = useState<DebugExchange[]>([]);
   const [addAccountStage, setAddAccountStage] = useState<'idle' | 'probe' | 'register'>('idle');
+  const [integrityMode, setIntegrityMode] = useState<WaIntegrityMode>('error_code');
   const [platformState, setPlatformState] = useState<SMSBowerRunState>({
     running: false,
     stopping: false,
@@ -1092,6 +1121,16 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
   const status = probeStatus(probe);
   const registrationLayout = configQuery.data?.registrationActionLayout || 'combined';
   const splitRegistrationLayout = registrationLayout === 'split';
+  const integrityModes = healthQuery.data?.registration?.integrity_modes || [];
+  const playIntegrityAvailable = Boolean(healthQuery.data?.capabilities?.play_integrity_api || integrityModes.includes('play_integrity_api'));
+  const selectedIntegrityMode = playIntegrityAvailable ? integrityMode : 'error_code';
+  const registerIntegrityMode = selectedIntegrityMode === 'play_integrity_api' ? selectedIntegrityMode : undefined;
+  const playIntegrityStatusQuery = useQuery({
+    queryKey: ['play-integrity-status', selectedIntegrityMode],
+    queryFn: getPlayIntegrityStatus,
+    enabled: selectedIntegrityMode === 'play_integrity_api',
+    refetchInterval: selectedIntegrityMode === 'play_integrity_api' ? 10000 : false,
+  });
   const lastProbeStatus = lastProbe ? probeStatus(lastProbe.response) : null;
   const currentProbeMatchesInput = Boolean(lastProbe && lastProbe.key === currentRegistrationKey);
   const channelStatus = currentProbeMatchesInput && lastProbeStatus ? lastProbeStatus : status;
@@ -1202,6 +1241,7 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
         const registration = await probeAndRegisterForSMSBower(
           normalized,
           config.openAIPhoneCheckEnabled,
+          registerIntegrityMode,
           setAddAccountStage,
           setDebugExchanges,
           setProbe,
@@ -1377,12 +1417,12 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
       }));
       throw new Error(openAIResult.message || 'OpenAI phone check failed');
     }
-    const registerBody = { ...phoneInput, delivery_method: method };
+    const registerBody = { ...phoneInput, delivery_method: method, ...(registerIntegrityMode ? { integrity_mode: registerIntegrityMode } : {}) };
     const registerExchange = debugRequest('发起注册', '/api/wa/register', registerBody);
     setAddAccountStage('register');
     setDebugExchanges((items) => [...items, registerExchange]);
     try {
-      const registerResponse = await registerPhone(phoneInput, method);
+      const registerResponse = await registerPhone(phoneInput, method, registerIntegrityMode);
       setDebugExchanges((items) => replaceDebugExchange(items, registerExchange, { ...registerExchange, response: sanitizeDebugValue(registerResponse) }));
       return registerResponse;
     } catch (error) {
@@ -1564,6 +1604,23 @@ function AddAccountPanel({ notify, onChanged }: { notify: (kind: Toast['kind'], 
                 })}
               </select>
             </label>
+            {playIntegrityAvailable ? (
+              <label>
+                GPIA 来源
+                <select data-field="integrity-mode" value={selectedIntegrityMode} onChange={(event) => setIntegrityMode(event.target.value as WaIntegrityMode)} disabled={addAccountBusy}>
+                  <option value="error_code">error_code</option>
+                  <option value="play_integrity_api">Play Integrity API</option>
+                </select>
+              </label>
+            ) : null}
+            {playIntegrityAvailable && selectedIntegrityMode === 'play_integrity_api' ? (
+              <StatusCallout
+                tone={playIntegrityStatusTone(playIntegrityStatusQuery.data, playIntegrityStatusQuery.isFetching)}
+                title="Play Integrity API"
+                detail={playIntegrityStatusDetail(playIntegrityStatusQuery.data, playIntegrityStatusQuery.isFetching)}
+                meta={playIntegrityStatusMeta(playIntegrityStatusQuery.data)}
+              />
+            ) : null}
             <StatusCallout tone={status.tone} title={status.label} detail={statusReason(status) || '完成号码探测后会显示通道状态。'} />
             <div className="method-grid">
               {channelStates.map((item) => (
@@ -1724,6 +1781,8 @@ type SettingsForm = {
   localDataDir: string;
   localCommonProxy: string;
   localDeviceProfilesFile: string;
+  localPlayIntegrityAPIUrl: string;
+  localPlayIntegrityAPIToken: string;
   autoStartLocalService: boolean;
   smsCancelQueuePollIntervalSeconds: number;
   registrationActionLayout: RegistrationActionLayout;
@@ -1783,6 +1842,7 @@ function debugInfo(label: string, body: unknown): DebugExchange {
 async function probeAndRegisterForSMSBower(
   phoneInput: PhoneInput,
   openAIPhoneCheckEnabled: boolean,
+  integrityMode: WaIntegrityMode | undefined,
   setStage: React.Dispatch<React.SetStateAction<'idle' | 'probe' | 'register'>>,
   setDebugExchanges: React.Dispatch<React.SetStateAction<DebugExchange[]>>,
   setProbe: React.Dispatch<React.SetStateAction<WorkflowResponse | null>>,
@@ -1832,12 +1892,12 @@ async function probeAndRegisterForSMSBower(
     return { ok: false as const, reason: openAIResult.message || 'OpenAI phone check failed' };
   }
 
-  const registerBody = { ...phoneInput, delivery_method: 'sms' };
+  const registerBody = { ...phoneInput, delivery_method: 'sms', ...(integrityMode ? { integrity_mode: integrityMode } : {}) };
   const registerExchange = debugRequest('发起注册', '/api/wa/register', registerBody);
   setStage('register');
   appendDebugExchange(setDebugExchanges, registerExchange);
   try {
-    const response = await registerPhone(phoneInput, 'sms');
+    const response = await registerPhone(phoneInput, 'sms', integrityMode);
     setProbe(response);
     patchDebugExchange(setDebugExchanges, registerExchange, { ...registerExchange, response: sanitizeDebugValue(response) });
     return { ok: true as const, response };
@@ -2211,6 +2271,8 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
     localDataDir: '',
     localCommonProxy: '',
     localDeviceProfilesFile: '',
+    localPlayIntegrityAPIUrl: '',
+    localPlayIntegrityAPIToken: '',
     autoStartLocalService: false,
     smsCancelQueuePollIntervalSeconds: 5,
     registrationActionLayout: 'combined',
@@ -2246,6 +2308,8 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
       localDataDir: configQuery.data.localDataDir,
       localCommonProxy: configQuery.data.localCommonProxy,
       localDeviceProfilesFile: configQuery.data.localDeviceProfilesFile,
+      localPlayIntegrityAPIUrl: configQuery.data.localPlayIntegrityAPIUrl,
+      localPlayIntegrityAPIToken: '',
       autoStartLocalService: configQuery.data.autoStartLocalService,
       smsCancelQueuePollIntervalSeconds: configQuery.data.smsCancelQueuePollIntervalSeconds,
       registrationActionLayout: configQuery.data.registrationActionLayout,
@@ -2268,6 +2332,7 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
     mutationFn: () => window.waConfig.set({
       ...form,
       password: form.password || undefined,
+      localPlayIntegrityAPIToken: form.localPlayIntegrityAPIToken || undefined,
       smsbowerApiKey: form.smsbowerApiKey || undefined,
       heroSMSApiKey: form.heroSMSApiKey || undefined,
     }),
@@ -2281,6 +2346,7 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
     mutationFn: () => window.waConfig.testConnection({
       ...form,
       password: form.password || undefined,
+      localPlayIntegrityAPIToken: form.localPlayIntegrityAPIToken || undefined,
       smsbowerApiKey: form.smsbowerApiKey || undefined,
       heroSMSApiKey: form.heroSMSApiKey || undefined,
     }),
@@ -2336,6 +2402,15 @@ function SettingsPanel({ notify }: { notify: (kind: Toast['kind'], message: stri
             <label>
               设备画像池文件
               <input data-field="local-device-profiles-file" value={form.localDeviceProfilesFile} onChange={(event) => setForm({ ...form, localDeviceProfilesFile: event.target.value })} placeholder="可选，留空使用内置多机型画像" />
+            </label>
+            <label>
+              Play Integrity API URL
+              <input data-field="local-play-integrity-api-url" value={form.localPlayIntegrityAPIUrl} onChange={(event) => setForm({ ...form, localPlayIntegrityAPIUrl: event.target.value })} placeholder="可选，例如 http://127.0.0.1:8787" />
+            </label>
+            <label>
+              Play Integrity API Token
+              <input data-field="local-play-integrity-api-token" value={form.localPlayIntegrityAPIToken} onChange={(event) => setForm({ ...form, localPlayIntegrityAPIToken: event.target.value })} type="password" placeholder={configQuery.data?.hasLocalPlayIntegrityAPIToken ? '已保存，留空不修改' : '可选'} />
+              {configQuery.data?.hasLocalPlayIntegrityAPIToken ? <span className="field-hint">Token 已保存在本地安全存储。</span> : null}
             </label>
             <label className="check-row">
               <input checked={form.autoStartLocalService} onChange={(event) => setForm({ ...form, autoStartLocalService: event.target.checked })} type="checkbox" />
@@ -2652,6 +2727,36 @@ function channelStateLabel(channel: ReturnType<typeof registrationChannelStates>
   if (channel.state === 'unavailable') return '不可用';
   if (channel.state === 'unsupported') return '不支持';
   return '需检测';
+}
+
+function playIntegrityStatusTone(status: Record<string, unknown> | undefined, loading: boolean) {
+  if (loading && !status) return 'warn';
+  if (!status) return 'idle';
+  if (status.ok === false || status.available === false || status.configured === false) return 'bad';
+  return 'ok';
+}
+
+function playIntegrityStatusDetail(status: Record<string, unknown> | undefined, loading: boolean) {
+  if (loading && !status) return '正在读取 VM 状态...';
+  if (!status) return '已选择 Play Integrity API，状态读取后会显示 VM 可用性。';
+  if (status.configured === false) return '服务端未配置 Play Integrity API URL 或 Token。';
+  if (status.available === false) return 'Play Integrity API 当前不可用，请检查服务端状态。';
+  const vm = status.vm && typeof status.vm === 'object' ? status.vm as Record<string, unknown> : {};
+  const state = String(vm.state || status.dgRunnerMode || 'ready');
+  const busy = vm.busy ? '，忙碌中' : '';
+  return `VM ${state}${busy}`;
+}
+
+function playIntegrityStatusMeta(status: Record<string, unknown> | undefined) {
+  if (!status) return '';
+  const total = Number(status.totalRequests || 0);
+  const success = Number(status.successRequests || 0);
+  const failed = Number(status.failedRequests || 0);
+  if (total || success || failed) return `请求 ${total} / 成功 ${success} / 失败 ${failed}`;
+  const vm = status.vm && typeof status.vm === 'object' ? status.vm as Record<string, unknown> : {};
+  const requestCount = Number(vm.requestCount || 0);
+  if (requestCount) return `VM 请求 ${requestCount}`;
+  return '';
 }
 
 function mergeAccounts(current: WAAccount[], next: WAAccount[]) {

@@ -1,5 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getOtpMessages, isTransientOTPSubmitError, messageText, normalizeTwoFactorStatus, pollAccountTransferRegistration, refreshAccountTransferChallenge, submitRegistrationOTP } from './api';
+import {
+  cleanupPendingRegistrationAccounts,
+  getOtpMessages,
+  getPlayIntegrityStatus,
+  isTransientOTPSubmitError,
+  messageText,
+  normalizeTwoFactorStatus,
+  pollAccountTransferRegistration,
+  refreshAccountTransferChallenge,
+  registerPhone,
+  submitRegistrationOTP,
+} from './api';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -106,6 +117,57 @@ describe('registration account transfer API', () => {
       method: 'POST',
       timeoutMs: 70000,
       body: { verification_request_id: 'wavrf_1', wa_account_id: 'waacc_1', max_attempts: 3 },
+    });
+  });
+});
+
+describe('server parity API endpoints', () => {
+  it('cleans pending registration accounts with the dashboard endpoint', async () => {
+    const request = vi.fn().mockResolvedValue({ deleted_count: 2 });
+    vi.stubGlobal('window', { waApi: { request } });
+
+    await cleanupPendingRegistrationAccounts();
+
+    expect(request).toHaveBeenCalledWith({
+      path: '/api/wa/accounts/cleanup-pending-registration',
+      method: 'POST',
+      timeoutMs: 70000,
+      body: undefined,
+    });
+  });
+
+  it('reads Play Integrity API status', async () => {
+    const request = vi.fn().mockResolvedValue({ configured: true });
+    vi.stubGlobal('window', { waApi: { request } });
+
+    await getPlayIntegrityStatus();
+
+    expect(request).toHaveBeenCalledWith({
+      path: '/api/wa/play-integrity/status',
+      method: undefined,
+      timeoutMs: 30000,
+      body: undefined,
+    });
+  });
+
+  it('adds integrity_mode to register only when selected', async () => {
+    const request = vi.fn().mockResolvedValue({ success: true });
+    vi.stubGlobal('window', { waApi: { request } });
+    const phone = {
+      region: 'US',
+      phone: '4155550123',
+      e164_number: '+14155550123',
+      country_calling_code: '1',
+      country_iso2: 'US',
+    };
+
+    await registerPhone(phone, 'sms', 'play_integrity_api');
+
+    expect(request).toHaveBeenCalledWith({
+      path: '/api/wa/register',
+      method: 'POST',
+      timeoutMs: 95000,
+      body: { ...phone, delivery_method: 'sms', integrity_mode: 'play_integrity_api' },
     });
   });
 });

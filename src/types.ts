@@ -128,6 +128,46 @@ export type WorkflowResponse = {
   check?: Record<string, unknown>;
 };
 
+export type DashboardHealthResponse = {
+  ok?: boolean;
+  capabilities?: { play_integrity_api?: boolean; [key: string]: unknown };
+  registration?: { integrity_modes?: string[]; [key: string]: unknown };
+  [key: string]: unknown;
+};
+
+export type PlayIntegrityStatusResponse = {
+  configured?: boolean;
+  ok?: boolean;
+  available?: boolean;
+  dgRunnerMode?: string;
+  maxConcurrency?: number;
+  totalRequests?: number;
+  successRequests?: number;
+  failedRequests?: number;
+  poTokenBackendConfigured?: boolean;
+  vm?: {
+    enabled?: boolean;
+    state?: string;
+    processRunning?: boolean;
+    busy?: boolean;
+    prewarmStarted?: boolean;
+    prewarmCompleted?: boolean;
+    prewarmElapsedMs?: number;
+    requestCount?: number;
+    successCount?: number;
+    failureCount?: number;
+    lastErrorLen?: number;
+    rawValuesPrinted?: boolean;
+    [key: string]: unknown;
+  };
+  rawValuesPrinted?: boolean;
+  unavailableReasonLen?: number;
+  error?: ApiError;
+  [key: string]: unknown;
+};
+
+export type CleanupPendingRegistrationAccountsResponse = { deleted_count?: number; error?: ApiError };
+
 export type ListAccountsResponse = { accounts?: WAAccount[]; next_cursor?: string; error?: ApiError };
 export type ListProfilesResponse = { client_profiles?: ClientProfile[]; next_cursor?: string; error?: ApiError };
 export type ListContactsResponse = { contacts?: WAContact[]; next_cursor?: string; error?: ApiError };

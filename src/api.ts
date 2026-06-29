@@ -1,12 +1,15 @@
 import type {
   AccountMessage,
   AccountSettingsResponse,
+  CleanupPendingRegistrationAccountsResponse,
+  DashboardHealthResponse,
   ListAccountsResponse,
   ListContactsResponse,
   ListMessagesResponse,
   ListOtpMessagesResponse,
   ListProfilesResponse,
   LongConnectionStatusResponse,
+  PlayIntegrityStatusResponse,
   WAAccount,
   WAContact,
   WorkflowResponse,
@@ -22,6 +25,8 @@ export type PhoneInput = {
   country_calling_code: string;
   country_iso2: string;
 };
+
+export type WaIntegrityMode = 'error_code' | 'play_integrity_api';
 
 export type ConnectionFilters = {
   login_state_id?: string;
@@ -57,6 +62,18 @@ export async function getAccounts(cursor = '') {
 
 export function deleteAccount(accountID: string) {
   return apiRequest(`/api/wa/accounts/${encodeURIComponent(accountID)}`, { method: 'DELETE' });
+}
+
+export function cleanupPendingRegistrationAccounts() {
+  return apiRequest<CleanupPendingRegistrationAccountsResponse>('/api/wa/accounts/cleanup-pending-registration', { method: 'POST', timeoutMs: 70000 });
+}
+
+export function getDashboardHealth() {
+  return apiRequest<DashboardHealthResponse>('/api/wa/health', { timeoutMs: 10000 });
+}
+
+export function getPlayIntegrityStatus() {
+  return apiRequest<PlayIntegrityStatusResponse>('/api/wa/play-integrity/status', { timeoutMs: 30000 });
 }
 
 export function getClientProfiles(accountID: string, cursor = '') {
@@ -115,8 +132,12 @@ export function probePhoneSMS(input: PhoneInput) {
   return apiRequest<WorkflowResponse>('/api/wa/phone/sms-probe', { method: 'POST', body: input, timeoutMs: 70000 });
 }
 
-export function registerPhone(input: PhoneInput, deliveryMethod: string) {
-  return apiRequest<WorkflowResponse>('/api/wa/register', { method: 'POST', body: { ...input, delivery_method: deliveryMethod }, timeoutMs: 95000 });
+export function registerPhone(input: PhoneInput, deliveryMethod: string, integrityMode?: WaIntegrityMode) {
+  return apiRequest<WorkflowResponse>('/api/wa/register', {
+    method: 'POST',
+    body: { ...input, delivery_method: deliveryMethod, ...(integrityMode ? { integrity_mode: integrityMode } : {}) },
+    timeoutMs: 95000,
+  });
 }
 
 export type SubmitRegistrationOTPInput = {

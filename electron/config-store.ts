@@ -52,6 +52,7 @@ export class ConfigStore {
     if (values.has('localDataDir')) partial.localDataDir = values.get('localDataDir');
     if (values.has('localCommonProxy')) partial.localCommonProxy = values.get('localCommonProxy');
     if (values.has('localDeviceProfilesFile')) partial.localDeviceProfilesFile = values.get('localDeviceProfilesFile');
+    if (values.has('localPlayIntegrityAPIUrl')) partial.localPlayIntegrityAPIUrl = values.get('localPlayIntegrityAPIUrl');
     if (values.has('autoStartLocalService')) partial.autoStartLocalService = values.get('autoStartLocalService') === '1';
     if (values.has('smsCancelQueuePollIntervalSeconds')) {
       partial.smsCancelQueuePollIntervalSeconds = Number(values.get('smsCancelQueuePollIntervalSeconds'));
@@ -72,6 +73,8 @@ export class ConfigStore {
     }
     const encryptedPassword = values.get('encryptedPassword');
     if (encryptedPassword !== undefined) partial.encryptedPassword = encryptedPassword;
+    const encryptedLocalPlayIntegrityAPIToken = values.get('encryptedLocalPlayIntegrityAPIToken');
+    if (encryptedLocalPlayIntegrityAPIToken !== undefined) partial.encryptedLocalPlayIntegrityAPIToken = encryptedLocalPlayIntegrityAPIToken;
     return normalizeStoredConfig({ ...defaultConfig(this.userDataDir), ...partial }, this.userDataDir);
   }
 
@@ -86,6 +89,7 @@ export class ConfigStore {
       this.upsert('localDataDir', n.localDataDir, now);
       this.upsert('localCommonProxy', n.localCommonProxy, now);
       this.upsert('localDeviceProfilesFile', n.localDeviceProfilesFile, now);
+      this.upsert('localPlayIntegrityAPIUrl', n.localPlayIntegrityAPIUrl, now);
       this.upsert('autoStartLocalService', n.autoStartLocalService ? '1' : '0', now);
       this.upsert('smsCancelQueuePollIntervalSeconds', String(n.smsCancelQueuePollIntervalSeconds), now);
       this.upsert('registrationActionLayout', n.registrationActionLayout, now);
@@ -94,6 +98,8 @@ export class ConfigStore {
       this.upsert('windowState', JSON.stringify(n.windowState), now);
       if (n.encryptedPassword) this.upsert('encryptedPassword', n.encryptedPassword, now);
       else this.deleteRow('encryptedPassword');
+      if (n.encryptedLocalPlayIntegrityAPIToken) this.upsert('encryptedLocalPlayIntegrityAPIToken', n.encryptedLocalPlayIntegrityAPIToken, now);
+      else this.deleteRow('encryptedLocalPlayIntegrityAPIToken');
       this.db.exec('COMMIT');
     } catch (error) {
       try {

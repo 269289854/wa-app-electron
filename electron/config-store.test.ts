@@ -36,6 +36,8 @@ describe('config store', () => {
       localBaseUrl: 'http://127.0.0.1:9000',
       localCommonProxy: 'http://127.0.0.1:10809',
       localDeviceProfilesFile: 'C:/wa/device_profiles.json',
+      localPlayIntegrityAPIUrl: 'https://pi.example.com',
+      encryptedLocalPlayIntegrityAPIToken: 'encoded-token',
       autoStartLocalService: true,
       smsCancelQueuePollIntervalSeconds: 12,
       registrationActionLayout: 'split' as const,
@@ -52,12 +54,15 @@ describe('config store', () => {
       localBaseUrl: 'http://127.0.0.1:9000',
       localCommonProxy: 'http://127.0.0.1:10809',
       localDeviceProfilesFile: 'C:/wa/device_profiles.json',
+      localPlayIntegrityAPIUrl: 'https://pi.example.com',
+      encryptedLocalPlayIntegrityAPIToken: 'encoded-token',
       autoStartLocalService: true,
       smsCancelQueuePollIntervalSeconds: 12,
       registrationActionLayout: 'split',
       smsProvider: 'hero-sms',
     });
     expect(loaded.smsbower).toMatchObject({ enabled: true, country: '187', maxPrice: 0.5 });
+    expect(publicConfig(loaded)).toMatchObject({ hasLocalPlayIntegrityAPIToken: true });
     expect(loaded.windowState).toEqual({ width: 1400, height: 900, x: 10, y: 20, maximized: true });
     store.close();
   });

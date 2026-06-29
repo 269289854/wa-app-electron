@@ -11,6 +11,7 @@ type ClientConfig = {
   localDataDir: string;
   localCommonProxy: string;
   localDeviceProfilesFile: string;
+  localPlayIntegrityAPIUrl: string;
   autoStartLocalService: boolean;
   smsCancelQueuePollIntervalSeconds: number;
   registrationActionLayout: RegistrationActionLayout;
@@ -18,6 +19,7 @@ type ClientConfig = {
   smsbower: SMSBowerPublicConfig;
   hasPassword: boolean;
   authPasswordRef: string;
+  hasLocalPlayIntegrityAPIToken: boolean;
 };
 
 type SMSBowerPublicConfig = {
@@ -39,7 +41,7 @@ type SMSBowerPublicConfig = {
 };
 
 type SMSBowerConfigPatch = Partial<Omit<SMSBowerPublicConfig, 'hasApiKey' | 'hasHeroSMSApiKey' | 'providerLabel' | 'configured'>>;
-type ClientConfigPatch = Partial<Omit<ClientConfig, 'smsbower'>> & { smsbower?: SMSBowerConfigPatch; password?: string; smsbowerApiKey?: string; heroSMSApiKey?: string };
+type ClientConfigPatch = Partial<Omit<ClientConfig, 'smsbower'>> & { smsbower?: SMSBowerConfigPatch; password?: string; localPlayIntegrityAPIToken?: string; smsbowerApiKey?: string; heroSMSApiKey?: string };
 
 type ConnectionTestResult = {
   ok: boolean;

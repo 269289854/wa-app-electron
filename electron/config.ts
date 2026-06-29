@@ -10,6 +10,7 @@ export type ClientConfig = {
   localDataDir: string;
   localCommonProxy: string;
   localDeviceProfilesFile: string;
+  localPlayIntegrityAPIUrl: string;
   autoStartLocalService: boolean;
   smsCancelQueuePollIntervalSeconds: number;
   registrationActionLayout: RegistrationActionLayout;
@@ -17,6 +18,7 @@ export type ClientConfig = {
   smsbower: SMSBowerPublicConfig;
   hasPassword: boolean;
   authPasswordRef: string;
+  hasLocalPlayIntegrityAPIToken: boolean;
 };
 
 export type SMSProvider = 'smsbower' | 'hero-sms';
@@ -53,8 +55,9 @@ export type WindowState = {
   maximized?: boolean;
 };
 
-export type StoredConfig = Omit<ClientConfig, 'hasPassword' | 'authPasswordRef' | 'smsbower'> & {
+export type StoredConfig = Omit<ClientConfig, 'hasPassword' | 'authPasswordRef' | 'hasLocalPlayIntegrityAPIToken' | 'smsbower'> & {
   encryptedPassword?: string;
+  encryptedLocalPlayIntegrityAPIToken?: string;
   smsbower: SMSBowerStoredConfig;
   windowState?: WindowState;
 };
@@ -69,6 +72,7 @@ export const defaultRemoteBaseUrl = 'https://wa.yizhimeng.uk';
 export const authPasswordRef = 'electron-safe-storage:wa-app-auth-password';
 export const smsbowerApiKeyRef = 'electron-safe-storage:smsbower-api-key';
 export const heroSMSApiKeyRef = 'electron-safe-storage:hero-sms-api-key';
+export const localPlayIntegrityAPITokenRef = 'electron-safe-storage:local-play-integrity-api-token';
 
 export function defaultConfig(userDataDir: string): StoredConfig {
   return {
@@ -78,6 +82,7 @@ export function defaultConfig(userDataDir: string): StoredConfig {
     localDataDir: join(userDataDir, 'wa-app-data'),
     localCommonProxy: '',
     localDeviceProfilesFile: '',
+    localPlayIntegrityAPIUrl: '',
     autoStartLocalService: false,
     smsCancelQueuePollIntervalSeconds: 5,
     registrationActionLayout: 'combined',
@@ -97,12 +102,14 @@ export function normalizeConfig(config: Partial<StoredConfig>, userDataDir: stri
     localDataDir: config.localDataDir || join(userDataDir, 'wa-app-data'),
     localCommonProxy: String(config.localCommonProxy || '').trim(),
     localDeviceProfilesFile: String(config.localDeviceProfilesFile || '').trim(),
+    localPlayIntegrityAPIUrl: normalizeBaseUrl(config.localPlayIntegrityAPIUrl || '') || '',
     autoStartLocalService: Boolean(config.autoStartLocalService),
     smsCancelQueuePollIntervalSeconds: boundedNumber(config.smsCancelQueuePollIntervalSeconds, 1, 300, 5),
     registrationActionLayout: normalizeRegistrationActionLayout(config.registrationActionLayout),
     smsProvider: normalizeSMSProvider(config.smsProvider),
     smsbower: normalizeSMSBowerConfig(config.smsbower),
     encryptedPassword: config.encryptedPassword,
+    encryptedLocalPlayIntegrityAPIToken: config.encryptedLocalPlayIntegrityAPIToken,
     windowState: normalizeWindowState(config.windowState),
   };
 }
@@ -154,6 +161,7 @@ export function normalizeWindowState(value?: Partial<WindowState>): WindowState 
 
 export function publicConfig(config: StoredConfig): ClientConfig {
   const hasPassword = Boolean(config.encryptedPassword);
+  const hasLocalPlayIntegrityAPIToken = Boolean(config.encryptedLocalPlayIntegrityAPIToken);
   const smsbower = publicSMSBowerConfig(config.smsbower, config.smsProvider);
   return {
     mode: config.mode,
@@ -162,6 +170,7 @@ export function publicConfig(config: StoredConfig): ClientConfig {
     localDataDir: config.localDataDir,
     localCommonProxy: config.localCommonProxy,
     localDeviceProfilesFile: config.localDeviceProfilesFile,
+    localPlayIntegrityAPIUrl: config.localPlayIntegrityAPIUrl,
     autoStartLocalService: config.autoStartLocalService,
     smsCancelQueuePollIntervalSeconds: config.smsCancelQueuePollIntervalSeconds,
     registrationActionLayout: config.registrationActionLayout,
@@ -169,6 +178,7 @@ export function publicConfig(config: StoredConfig): ClientConfig {
     smsbower,
     hasPassword,
     authPasswordRef: hasPassword ? authPasswordRef : '',
+    hasLocalPlayIntegrityAPIToken,
   };
 }
 
@@ -239,6 +249,30 @@ export function getPassword(config: StoredConfig, codec: PasswordCodec) {
   if (!config.encryptedPassword) return '';
   try {
     const value = Buffer.from(config.encryptedPassword, 'base64');
+    return codec.isEncryptionAvailable() ? codec.decryptString(value) : value.toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
+export function setLocalPlayIntegrityAPIToken(config: StoredConfig, token: string | undefined, codec: PasswordCodec) {
+  if (token === undefined) return config;
+  const trimmed = token.trim();
+  if (!trimmed) {
+    const rest = { ...config };
+    delete rest.encryptedLocalPlayIntegrityAPIToken;
+    return rest;
+  }
+  const encoded = codec.isEncryptionAvailable()
+    ? codec.encryptString(trimmed).toString('base64')
+    : Buffer.from(trimmed, 'utf8').toString('base64');
+  return { ...config, encryptedLocalPlayIntegrityAPIToken: encoded };
+}
+
+export function getLocalPlayIntegrityAPIToken(config: StoredConfig, codec: PasswordCodec) {
+  if (!config.encryptedLocalPlayIntegrityAPIToken) return '';
+  try {
+    const value = Buffer.from(config.encryptedLocalPlayIntegrityAPIToken, 'base64');
     return codec.isEncryptionAvailable() ? codec.decryptString(value) : value.toString('utf8');
   } catch {
     return '';

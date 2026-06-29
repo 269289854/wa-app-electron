@@ -246,6 +246,7 @@ button, input, select, textarea, a, label, .account-rail, .workspace {
   border-color: var(--line);
 }
 .danger-button { margin-left: auto; background: #fff1f4; color: #c3274c; border-color: #ffc9d6; }
+.rail-cleanup-action { width: 100%; margin-top: 8px; }
 .refresh-button { min-width: 72px; }
 
 .rail-search, .search-box {

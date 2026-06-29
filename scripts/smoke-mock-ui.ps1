@@ -55,6 +55,11 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', 'http://127.0.0.1');
   const path = url.pathname;
   if (path === '/healthz') return json(res, { ok: true, service: 'mock-wa-app', path: '/healthz' });
+  if (path === '/api/wa/health') return json(res, {
+    ok: true,
+    capabilities: { play_integrity_api: true },
+    registration: { integrity_modes: ['error_code', 'play_integrity_api'] },
+  });
   if (path === '/__operations') return json(res, { operations });
   if (path === '/api/wa/accounts') {
     if (url.searchParams.get('cursor') === 'page-2') return json(res, {
@@ -139,6 +144,19 @@ const server = http.createServer(async (req, res) => {
   if (path === '/api/wa/account-settings/2fa/status') return json(res, {
     status: { configured: true, email_configured: true, email_address: 'mock@example.com' },
   });
+  if (path === '/api/wa/play-integrity/status') {
+    operations.push({ method: req.method, path, body: {} });
+    return json(res, {
+      configured: true,
+      ok: true,
+      available: true,
+      dgRunnerMode: 'vm',
+      totalRequests: 4,
+      successRequests: 3,
+      failedRequests: 1,
+      vm: { enabled: true, state: 'ready', busy: false, requestCount: 4 },
+    });
+  }
   if (path.includes('/profile-picture')) return text(res, '');
   if (req.method === 'POST' || req.method === 'DELETE') {
     const body = await readBody(req);
@@ -154,6 +172,7 @@ const server = http.createServer(async (req, res) => {
       ],
       phone_status: { sms_available: true },
     });
+    if (path === '/api/wa/accounts/cleanup-pending-registration') return json(res, { deleted_count: 1 });
     if (path === '/api/wa/register') return json(res, { success: true, status: 'otp_required', wa_account_id: body.e164_number === '+573145865572' ? platformAccountID : accountID, verification_request_id: verificationRequestID, delivery_method: body.delivery_method || 'sms', retry_after_seconds: 12, account_transfer_challenge: body.delivery_method === 'wa_old' ? { type: 'wa_old' } : undefined });
     if (path === '/api/wa/actions/registration/account-transfer/refresh') return json(res, { success: true, verification_request_id: body.verification_request_id, account_transfer_challenge: { type: 'wa_old', refreshed: true } });
     if (path === '/api/wa/actions/registration/account-transfer/poll') return json(res, { success: true, status: 'pending', verification_request_id: body.verification_request_id, wa_account_id: body.wa_account_id });
@@ -321,7 +340,7 @@ async function waitForOperationCount(path, count, method = 'POST', timeoutMs = 1
   throw new Error(`Expected ${count} operations for ${method} ${path}; got ${operations.slice(afterIndex).filter((operation) => operation.path === path && operation.method === method).length}; operations=${JSON.stringify(operations.slice(afterIndex))}`);
 }
 
-async function runInPage(client, source, timeoutMs = 30000) {
+async function runInPage(client, source, timeoutMs = 60000) {
   try {
     new Function(`return (async () => { ${source} })()`);
   } catch (error) {
@@ -526,7 +545,32 @@ async function main() {
     `);
     checks.accountPage = true;
     checks.accountActions = true;
+    const operationsBeforeCleanup = (await getOperations()).length;
+    await route(client, '#/chats', 'Boolean(document.querySelector(".app-shell[data-view=chats]"))');
+    await runInPage(client, `
+      window.confirm = () => true;
+      const button = document.querySelector('[data-action="cleanup-pending-registration"]');
+      if (!button || button.disabled) throw new Error('Cleanup pending registration button is not ready');
+      button.click();
+      return true;
+    `);
+    const cleanupOperation = await waitForOperation('/api/wa/accounts/cleanup-pending-registration', 'POST', 15000, operationsBeforeCleanup);
+    if (!cleanupOperation) throw new Error('Cleanup pending registration endpoint was not called');
+    checks.pendingRegistrationCleanup = true;
     await route(client, '#/add', 'Boolean(document.querySelector(".app-shell[data-view=add] .add-page"))');
+    const operationsBeforeIntegrityStatus = (await getOperations()).length;
+    await runInPage(client, `
+      const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
+      const select = addPage.querySelector('[data-field="integrity-mode"]');
+      if (!select) throw new Error('Integrity mode selector was not rendered');
+      if (![...select.options].some((option) => option.value === 'play_integrity_api')) throw new Error('Play Integrity API option is missing');
+      select.value = 'play_integrity_api';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    `);
+    await waitForOperation('/api/wa/play-integrity/status', 'GET', 15000, operationsBeforeIntegrityStatus);
+    checks.playIntegritySelector = true;
+    const operationsBeforeIntegrityRegister = (await getOperations()).length;
     await runInPage(client, `
       const setValue = (input, value) => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
@@ -543,8 +587,10 @@ async function main() {
       button.click();
       return true;
     `);
-    await waitForOperationWithDebug(client, '/api/wa/phone/sms-probe');
-    await waitForOperationWithDebug(client, '/api/wa/register');
+    await waitForOperationWithDebug(client, '/api/wa/phone/sms-probe', 'POST', 15000, operationsBeforeIntegrityRegister);
+    await waitForOperationWithDebug(client, '/api/wa/register', 'POST', 15000, operationsBeforeIntegrityRegister);
+    const integrityRegister = (await getOperations()).slice(operationsBeforeIntegrityRegister).find((operation) => operation.path === '/api/wa/register');
+    if (integrityRegister?.body?.integrity_mode !== 'play_integrity_api') throw new Error('Register payload did not include Play Integrity mode');
     await runInPage(client, `
       const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
       const channels = Object.fromEntries([...addPage.querySelectorAll('[data-channel]')].map((item) => [item.dataset.channel, item.dataset.state]));
@@ -675,6 +721,11 @@ async function main() {
     const operationsBeforePlatform = (await getOperations()).length;
     await runInPage(client, `
       const addPage = [...document.querySelectorAll('.app-shell[data-view=add] .add-page')].find((page) => page.offsetParent !== null);
+      const integrity = addPage.querySelector('[data-field="integrity-mode"]');
+      if (integrity) {
+        integrity.value = 'play_integrity_api';
+        integrity.dispatchEvent(new Event('change', { bubbles: true }));
+      }
       const platformCard = [...addPage.querySelectorAll('.info-card')].find((card) => card.querySelector('.platform-register'));
       let button = platformCard?.querySelector('.primary-button');
       for (let index = 0; index < 50 && button?.disabled; index += 1) {
@@ -687,6 +738,8 @@ async function main() {
     `);
     await waitForExpression(client, 'document.querySelector(".add-page .debug-json")?.innerText.includes("SMSBower start")');
     await waitForOperationWithDebug(client, '/api/wa/register', 'POST', 15000, operationsBeforePlatform);
+    const platformRegister = (await getOperations()).slice(operationsBeforePlatform).find((operation) => operation.path === '/api/wa/register');
+    if (platformRegister?.body?.integrity_mode !== 'play_integrity_api') throw new Error('Platform registration payload did not include Play Integrity mode');
     const platformOtpOperations = await waitForOperationCount('/api/wa/actions/registration/resume-otp', 3, 'POST', 20000, operationsBeforePlatform);
     if (!platformOtpOperations.every((operation) => operation.body?.verification_request_id === 'wavrf-smoke-1')) throw new Error('Platform OTP submit did not include verification_request_id');
     checks.platformOtpRetry = true;

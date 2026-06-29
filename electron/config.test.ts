@@ -3,6 +3,7 @@ import {
   authPasswordRef,
   defaultConfig,
   getPassword,
+  getLocalPlayIntegrityAPIToken,
   getSMSBowerApiKey,
   getHeroSMSApiKey,
   normalizeBaseUrl,
@@ -11,6 +12,7 @@ import {
   parseTestConfig,
   publicConfig,
   setPassword,
+  setLocalPlayIntegrityAPIToken,
   setSMSBowerApiKey,
   setHeroSMSApiKey,
   type PasswordCodec,
@@ -38,6 +40,7 @@ describe('electron config helpers', () => {
     expect(config.localDataDir).toContain('wa-app-data');
     expect(config.localCommonProxy).toBe('');
     expect(config.localDeviceProfilesFile).toBe('');
+    expect(config.localPlayIntegrityAPIUrl).toBe('');
     expect(config.registrationActionLayout).toBe('combined');
     expect(config.smsbower).toMatchObject({ enabled: false, targetSuccessCount: 1, maxOrders: 3, numberIntervalSeconds: 0, openAIPhoneCheckEnabled: false });
     expect(config.windowState).toEqual({ width: 1320, height: 860 });
@@ -51,6 +54,7 @@ describe('electron config helpers', () => {
       localDataDir: '',
       localCommonProxy: ' socks5://127.0.0.1:10808 ',
       localDeviceProfilesFile: ' C:/wa/device_profiles.json ',
+      localPlayIntegrityAPIUrl: ' https://pi.example.com///status?token=x ',
       autoStartLocalService: 1 as unknown as boolean,
       smsCancelQueuePollIntervalSeconds: 999,
       registrationActionLayout: 'split',
@@ -64,6 +68,7 @@ describe('electron config helpers', () => {
     expect(config.localDataDir.replaceAll('\\', '/')).toContain('wa-app-data');
     expect(config.localCommonProxy).toBe('socks5://127.0.0.1:10808');
     expect(config.localDeviceProfilesFile).toBe('C:/wa/device_profiles.json');
+    expect(config.localPlayIntegrityAPIUrl).toBe('https://pi.example.com///status');
     expect(config.autoStartLocalService).toBe(true);
     expect(config.smsCancelQueuePollIntervalSeconds).toBe(300);
     expect(config.registrationActionLayout).toBe('split');
@@ -123,6 +128,7 @@ describe('electron config helpers', () => {
     expect(config.hasPassword).toBe(true);
     expect(config.authPasswordRef).toBe(authPasswordRef);
     expect(config.registrationActionLayout).toBe('combined');
+    expect(config.hasLocalPlayIntegrityAPIToken).toBe(false);
     expect(JSON.stringify(config)).not.toContain('abc');
     expect('encryptedPassword' in config).toBe(false);
   });
@@ -195,6 +201,18 @@ describe('electron config helpers', () => {
     const cleared = setPassword(withPassword, '', encryptedCodec);
     expect(cleared.encryptedPassword).toBeUndefined();
     expect(publicConfig(cleared).authPasswordRef).toBe('');
+  });
+
+  it('stores Play Integrity token locally without publishing plaintext', () => {
+    const stored = setLocalPlayIntegrityAPIToken(defaultConfig('C:/data'), ' pi-token ', encryptedCodec);
+    const config = publicConfig(stored);
+    expect(config.hasLocalPlayIntegrityAPIToken).toBe(true);
+    expect(JSON.stringify(config)).not.toContain('pi-token');
+    expect(getLocalPlayIntegrityAPIToken(stored, encryptedCodec)).toBe('pi-token');
+
+    const cleared = setLocalPlayIntegrityAPIToken(stored, '', encryptedCodec);
+    expect(cleared.encryptedLocalPlayIntegrityAPIToken).toBeUndefined();
+    expect(publicConfig(cleared).hasLocalPlayIntegrityAPIToken).toBe(false);
   });
 
   it('falls back to base64 when OS encryption is unavailable', () => {

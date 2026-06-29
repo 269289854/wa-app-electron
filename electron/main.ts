@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import {
   defaultConfig,
   getPassword as decodePassword,
+  getLocalPlayIntegrityAPIToken as decodeLocalPlayIntegrityAPIToken,
   getSMSBowerApiKey as decodeSMSBowerApiKey,
   getHeroSMSApiKey as decodeHeroSMSApiKey,
   normalizeConfig as normalizeStoredConfig,
@@ -16,6 +17,7 @@ import {
   parseTestConfig,
   publicConfig as toPublicConfig,
   setHeroSMSApiKey as applyHeroSMSApiKey,
+  setLocalPlayIntegrityAPIToken as applyLocalPlayIntegrityAPIToken,
   setSMSBowerApiKey as applySMSBowerApiKey,
   setPassword as applyPassword,
   type ClientConfig,
@@ -23,6 +25,7 @@ import {
 } from './config.js';
 import { smsbowerWhatsAppService } from './smsbower.js';
 import { ConfigStore, createConfigStore, migrateConfigFromJson } from './config-store.js';
+import { buildLocalServiceEnv } from './local-service-env.js';
 import {
   createSMSCancelQueueStore,
   SMSCancelQueueService,
@@ -41,7 +44,7 @@ type ApiRequestInput = {
   timeoutMs?: number;
 };
 
-type ClientConfigPatch = Partial<ClientConfig> & { password?: string; smsbowerApiKey?: string; heroSMSApiKey?: string };
+type ClientConfigPatch = Partial<ClientConfig> & { password?: string; localPlayIntegrityAPIToken?: string; smsbowerApiKey?: string; heroSMSApiKey?: string };
 
 type SMSPlatformProviderInput = { provider?: SMSProvider };
 type SMSBowerPriceInput = SMSPlatformProviderInput & { country?: string };
@@ -140,6 +143,10 @@ function setPassword(config: StoredConfig, password?: string) {
 
 function getPassword(config = readConfig()) {
   return decodePassword(config, safeStorage);
+}
+
+function getLocalPlayIntegrityAPIToken(config = readConfig()) {
+  return decodeLocalPlayIntegrityAPIToken(config, safeStorage);
 }
 
 function getSMSPlatformClient(config = readConfig(), providerOverride?: SMSProvider) {
@@ -365,7 +372,15 @@ function applyConfigPatch(previous: StoredConfig, patch?: ClientConfigPatch) {
     ...patch,
     smsbower: normalizeSMSBowerConfig({ ...previous.smsbower, ...patch.smsbower }),
   });
-  return normalizeConfig(applyHeroSMSApiKey(applySMSBowerApiKey(setPassword(merged, patch.password), patch.smsbowerApiKey, safeStorage), patch.heroSMSApiKey, safeStorage));
+  return normalizeConfig(applyHeroSMSApiKey(
+    applySMSBowerApiKey(
+      applyLocalPlayIntegrityAPIToken(setPassword(merged, patch.password), patch.localPlayIntegrityAPIToken, safeStorage),
+      patch.smsbowerApiKey,
+      safeStorage,
+    ),
+    patch.heroSMSApiKey,
+    safeStorage,
+  ));
 }
 
 async function requestHealth() {
@@ -418,15 +433,7 @@ async function startLocalService() {
   localPort = await findFreePort();
   mkdirSync(config.localDataDir, { recursive: true });
   localProcess = spawn(executable, [], {
-    env: {
-      ...process.env,
-      WA_APP_DASHBOARD_HTTP_ADDR: `127.0.0.1:${localPort}`,
-      WA_APP_LISTEN_ADDR: '127.0.0.1:0',
-      WA_APP_DATA_DIR: config.localDataDir,
-      WA_APP_AUTH_PASSWORD: getPassword(config),
-      WA_COMMON_PROXY: config.localCommonProxy,
-      WA_APP_DEVICE_PROFILES_FILE: config.localDeviceProfilesFile,
-    },
+    env: buildLocalServiceEnv(process.env, config, { port: localPort, password: getPassword(config), playIntegrityAPIToken: getLocalPlayIntegrityAPIToken(config) }),
   });
   localProcess.once('exit', () => {
     localProcess = null;
