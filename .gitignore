@@ -6,3 +6,4 @@ release/
 *.tmp
 .DS_Store
 /.idea
+.codegraph
