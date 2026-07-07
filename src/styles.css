@@ -708,7 +708,7 @@ button, input, select, textarea, a, label, .account-rail, .workspace {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: 1000;
   display: grid;
   place-items: center;
   background: rgba(15, 23, 42, 0.38);

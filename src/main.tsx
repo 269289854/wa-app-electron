@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { HashRouter, Navigate, Route, Routes, useNavigate, useParams } from 'react-router';
@@ -242,7 +243,6 @@ function DesktopApp() {
               active={selectedAccountID === accountID(account)}
               onClick={() => {
                 setSelectedAccountID(accountID(account));
-                setView('chats');
               }}
             />
           ))}
@@ -1040,7 +1040,7 @@ function SecurityCard({ account, notify }: { account: WAAccount; notify: (kind: 
 
 function Modal({ open, title, icon, children, onClose }: { open: boolean; title: string; icon?: React.ReactNode; children: React.ReactNode; onClose: () => void }) {
   if (!open) return null;
-  return (
+  return createPortal(
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="modal-panel" role="dialog" aria-modal="true" aria-label={title}>
         <header>
@@ -1049,7 +1049,8 @@ function Modal({ open, title, icon, children, onClose }: { open: boolean; title:
         </header>
         {children}
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
