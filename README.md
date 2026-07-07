@@ -12,12 +12,7 @@ WA App 的 Electron + React + Vite + TypeScript 全平台桌面客户端。
 
 ## 服务端同步锚点
 
-后续继续从服务端 `wa-app` 同步客户端功能时，先对比以下锚点之后的服务端提交：
-
-- 客户端当前功能补齐提交：`pending`（2026-06-29，`Sync pending-registration cleanup and Play Integrity API mode`）。
-- 客户端已合入的 `origin/main` 基线：`162ada9ddce3b573d63078b2aece62c75de6a885`（2026-06-18 16:52:50 +0800，`Release v1.0.2`）。
-- 本轮对齐参考的本地服务端 `D:\work\github work\wa-app` 提交：`a3ad067`（2026-06-29，本地 `main`，`Merge branch 'main' of https://github.com/pood1e/wa-app`）。
-- 刷新时看到的服务端 `origin/main` 提交：`be369e1`（2026-06-29，`feat: clean pending registration accounts`）。
+后续继续从服务端 `wa-app` 同步客户端功能时，参考 [SERVER_SYNC.md](./SERVER_SYNC.md)。
 
 ## 开发
 
