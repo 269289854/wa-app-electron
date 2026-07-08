@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <header>
+      <h1>OpenAI Phone Picker</h1>
+      <button id="refresh" type="button" title="Refresh">Refresh</button>
+    </header>
+    <label class="search">
+      Search WA App phones
+      <input id="query" type="search" placeholder="Phone, country, name, account ID" autocomplete="off">
+    </label>
+    <div id="status" class="status">Loading...</div>
+    <main id="accounts" class="accounts"></main>
+    <script src="popup.js"></script>
+  </body>
+</html>

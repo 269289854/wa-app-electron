@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "WA App OpenAI Phone Picker",
+  "version": "0.1.0",
+  "description": "Search WA App account phone numbers and fill the OpenAI add-phone page.",
+  "permissions": ["storage", "tabs", "scripting"],
+  "host_permissions": [
+    "https://auth.openai.com/*",
+    "http://127.0.0.1:17391/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://auth.openai.com/add-phone*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "OpenAI Phone Picker"
+  }
+}

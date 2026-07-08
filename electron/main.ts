@@ -27,6 +27,12 @@ import { smsbowerWhatsAppService } from './smsbower.js';
 import { ConfigStore, createConfigStore, migrateConfigFromJson } from './config-store.js';
 import { buildLocalServiceEnv } from './local-service-env.js';
 import {
+  boundedLimit,
+  filterOpenAIPhonePickerAccounts,
+  limitOpenAIPhonePickerAccounts,
+  normalizeOpenAIPhonePickerAccount,
+} from './openai-phone-picker.js';
+import {
   createSMSCancelQueueStore,
   SMSCancelQueueService,
   smsCancelQueueDefaultPollIntervalSeconds,
@@ -66,6 +72,11 @@ type OpenAIPhoneCheckResult = {
   message: string;
   code?: string;
   raw?: unknown;
+};
+type ListAccountsResponse = {
+  accounts?: unknown[];
+  next_cursor?: string;
+  nextCursor?: string;
 };
 
 const mockSMSBowerEnabled = process.env.WA_APP_ELECTRON_MOCK_SMSBOWER === '1';
@@ -395,6 +406,31 @@ async function requestHealth() {
   }
 }
 
+async function listOpenAIPhonePickerAccounts(query: string, limit: number) {
+  const requestedLimit = boundedLimit(limit);
+  const normalizedQuery = query.trim();
+  const collected: ReturnType<typeof normalizeOpenAIPhonePickerAccount>[] = [];
+  let cursor = '';
+  let scanned = 0;
+  while (scanned < 1000) {
+    const params = new URLSearchParams({ limit: '100' });
+    if (cursor) params.set('cursor', cursor);
+    const response = await requestJSON<ListAccountsResponse>({ path: `/api/wa/accounts?${params}`, timeoutMs: 30000 });
+    const accounts = response.accounts || [];
+    if (!accounts.length) break;
+    scanned += accounts.length;
+    for (const account of accounts) {
+      const normalized = normalizeOpenAIPhonePickerAccount(account);
+      if (normalized) collected.push(normalized);
+    }
+    if (!normalizedQuery && collected.length >= requestedLimit) break;
+    cursor = String(response.next_cursor || response.nextCursor || '');
+    if (!cursor) break;
+  }
+  const normalizedAccounts = collected.filter((account): account is NonNullable<typeof account> => Boolean(account));
+  return limitOpenAIPhonePickerAccounts(filterOpenAIPhonePickerAccounts(normalizedAccounts, normalizedQuery), requestedLimit);
+}
+
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -568,6 +604,13 @@ async function handleOpenAIPhoneBridgeRequest(request: IncomingMessage, response
       writeJSON(response, 200, { ok: true });
       return;
     }
+    if (request.method === 'GET' && url.pathname === '/openai-phone-picker/accounts') {
+      const query = url.searchParams.get('query') || '';
+      const limit = boundedLimit(url.searchParams.get('limit'));
+      const accounts = await listOpenAIPhonePickerAccounts(query, limit);
+      writeJSON(response, 200, { accounts });
+      return;
+    }
     writeJSON(response, 404, { ok: false, error: 'Not found' });
   } catch (error) {
     writeJSON(response, 500, { ok: false, error: errorMessage(error) });
@@ -677,6 +720,7 @@ app.whenReady().then(async () => {
   const config = readConfig();
   if (config.mode === 'local' && config.autoStartLocalService) await startLocalService();
   await initSMSCancelQueue(config);
+  startOpenAIPhoneBridge();
   ipcMain.handle('wa-config:get', () => publicConfig());
   ipcMain.handle('wa-config:set', (_event, input: ClientConfigPatch) => {
     const next = applyConfigPatch(readConfig(), input);
