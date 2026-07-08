@@ -55,6 +55,9 @@
   --bubble-out: #daf9ec;
   --bubble-out-line: #aceed5;
   --avatar-ghost-bg: #e8f2f7;
+  --scrollbar-track: #dcecf5;
+  --scrollbar-thumb: #8eb8c9;
+  --scrollbar-thumb-hover: #4cced4;
 }
 
 :root[data-theme="dark"] {
@@ -111,9 +114,143 @@
   --bubble-out: #143c31;
   --bubble-out-line: #276753;
   --avatar-ghost-bg: #223242;
+  --scrollbar-track: #101a25;
+  --scrollbar-thumb: #52677d;
+  --scrollbar-thumb-hover: #72dce5;
 }
 
 * { box-sizing: border-box; }
+
+:where(
+  .rail-list,
+  .scroll-list,
+  .message-list,
+  .account-page,
+  .add-page,
+  .settings-page,
+  .cancel-queue-page,
+  .connection-fallback,
+  .country-options,
+  .json-box
+) {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+:where(
+  .rail-list,
+  .scroll-list,
+  .message-list,
+  .account-page,
+  .add-page,
+  .settings-page,
+  .cancel-queue-page,
+  .connection-fallback,
+  .country-options,
+  .json-box
+)::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: var(--scrollbar-track);
+}
+
+:where(
+  .rail-list,
+  .scroll-list,
+  .message-list,
+  .account-page,
+  .add-page,
+  .settings-page,
+  .cancel-queue-page,
+  .connection-fallback,
+  .country-options,
+  .json-box
+)::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+  border-radius: 999px;
+}
+
+:where(
+  .rail-list,
+  .scroll-list,
+  .message-list,
+  .account-page,
+  .add-page,
+  .settings-page,
+  .cancel-queue-page,
+  .connection-fallback,
+  .country-options,
+  .json-box
+)::-webkit-scrollbar-track-piece {
+  background: var(--scrollbar-track);
+  border-radius: 999px;
+}
+
+:where(
+  .rail-list,
+  .scroll-list,
+  .message-list,
+  .account-page,
+  .add-page,
+  .settings-page,
+  .cancel-queue-page,
+  .connection-fallback,
+  .country-options,
+  .json-box
+)::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border: 2px solid var(--scrollbar-track);
+  border-radius: 999px;
+}
+
+:where(
+  .rail-list,
+  .scroll-list,
+  .message-list,
+  .account-page,
+  .add-page,
+  .settings-page,
+  .cancel-queue-page,
+  .connection-fallback,
+  .country-options,
+  .json-box
+)::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+:where(
+  .rail-list,
+  .scroll-list,
+  .message-list,
+  .account-page,
+  .add-page,
+  .settings-page,
+  .cancel-queue-page,
+  .connection-fallback,
+  .country-options,
+  .json-box
+)::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+  background: var(--scrollbar-track);
+}
+
+:where(
+  .rail-list,
+  .scroll-list,
+  .message-list,
+  .account-page,
+  .add-page,
+  .settings-page,
+  .cancel-queue-page,
+  .connection-fallback,
+  .country-options,
+  .json-box
+)::-webkit-scrollbar-corner {
+  background: var(--scrollbar-track);
+}
+
 body {
   margin: 0;
   min-width: 1060px;
@@ -213,7 +350,7 @@ button, input, select, textarea, a, label, .account-rail, .workspace {
 
 .account-rail {
   display: grid;
-  grid-template-rows: auto auto auto 1fr auto auto;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto;
   min-height: 0;
   border-right: 1px solid var(--line-strong);
   background: var(--rail-bg);
