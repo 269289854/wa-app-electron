@@ -1,4 +1,4 @@
-/* global getComputedStyle */
+/* global getComputedStyle, HTMLSelectElement */
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'openai-phone-picker-ping') {
@@ -42,6 +42,11 @@ function normalizeAccountPayload(account) {
 }
 
 async function selectCountry(phone) {
+  const nativeSelect = selectNativeCountry(phone);
+  if (nativeSelect) {
+    await sleep(150);
+    return;
+  }
   const trigger = findCountryTrigger(phone);
   if (!trigger) throw new Error('OpenAI country selector was not found');
   trigger.click();
@@ -53,6 +58,19 @@ async function selectCountry(phone) {
   }
   if (textHasCallingCode(elementText(trigger), phone.countryCallingCode)) return;
   throw new Error(`OpenAI country option +${phone.countryCallingCode} was not found`);
+}
+
+function selectNativeCountry(phone) {
+  if (!phone.countryIso2) return null;
+  const select = queryAll('select').find((item) => {
+    const option = [...item.options].find((candidate) => candidate.value.toUpperCase() === phone.countryIso2);
+    return option && !isDisabled(item);
+  });
+  if (!select) return null;
+  const option = [...select.options].find((candidate) => candidate.value.toUpperCase() === phone.countryIso2);
+  if (!option) return null;
+  setSelectValue(select, option.value);
+  return select;
 }
 
 function findCountryTrigger(phone) {
@@ -140,6 +158,14 @@ function setInputValue(input, value) {
   else input.value = value;
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function setSelectValue(select, value) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+  if (setter) setter.call(select, value);
+  else select.value = value;
+  select.dispatchEvent(new Event('input', { bubbles: true }));
+  select.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 function textHasCallingCode(text, callingCode) {

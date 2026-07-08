@@ -122,6 +122,73 @@ describe('OpenAI phone picker extension', () => {
     expect(phoneInput.events).toEqual(['input', 'change']);
     expect(continueButton.clicked).toBe(false);
   });
+
+  it('uses the native country select when the visible dropdown has not rendered the country option', async () => {
+    const listenerRef: { listener?: (message: unknown, sender: unknown, sendResponse: (response: unknown) => void) => boolean } = {};
+    const countryTrigger = fakeButton('アメリカ合衆国 (+1)', () => undefined, { role: 'combobox' });
+    const visibleOption = fakeButton('アメリカ合衆国 (+1)', () => undefined, { role: 'option', 'data-country': 'US' });
+    const continueButton = fakeButton('続行', () => undefined);
+    const countrySelect = new FakeSelect('US', [
+      { value: '', text: '' },
+      { value: 'US', text: 'アメリカ合衆国' },
+      { value: 'GB', text: 'イギリス' },
+    ]);
+    const phoneInput = new FakeInput({ type: 'tel', name: 'phone-number' });
+    const context = vm.createContext({
+      chrome: {
+        runtime: {
+          onMessage: {
+            addListener: (listener: typeof listenerRef.listener) => {
+              listenerRef.listener = listener;
+            },
+          },
+        },
+      },
+      document: {
+        querySelectorAll: (selector: string) => {
+          if (selector === 'select') return [countrySelect];
+          if (selector === 'input') return [phoneInput];
+          if (selector.includes('button') || selector.includes('role') || selector.includes('tabindex') || selector.includes('li')) {
+            return [countryTrigger, visibleOption, continueButton];
+          }
+          return [];
+        },
+      },
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
+      HTMLInputElement: FakeInput,
+      HTMLSelectElement: FakeSelect,
+      Event: FakeEvent,
+      Object,
+      RegExp,
+      String,
+      Error,
+      Promise,
+      setTimeout,
+      clearTimeout,
+    });
+
+    vm.runInContext(readFileSync(resolve('chrome-extension/openai-phone-picker/content.js'), 'utf8'), context);
+
+    const response = deferred<unknown>();
+    expect(listenerRef.listener?.({
+      type: 'openai-phone-picker-apply',
+      account: {
+        accountId: 'waacc_gb',
+        e164Number: '+447541944532',
+        nationalNumber: '7541944532',
+        countryCallingCode: '44',
+        countryIso2: 'GB',
+      },
+    }, {}, response.resolve)).toBe(true);
+
+    await expect(response.promise).resolves.toMatchObject({ ok: true });
+    expect(countrySelect.value).toBe('GB');
+    expect(countrySelect.events).toEqual(['input', 'change']);
+    expect(countryTrigger.clicked).toBe(false);
+    expect(visibleOption.clicked).toBe(false);
+    expect(continueButton.clicked).toBe(false);
+    expect(phoneInput.value).toBe('7541944532');
+  });
 });
 
 class FakeEvent {
@@ -184,6 +251,36 @@ class FakeInput extends FakeElement {
 
   set value(value: string) {
     this.nextValue = value;
+  }
+
+  dispatchEvent(event: FakeEvent) {
+    this.events.push(event.type);
+  }
+}
+
+class FakeSelect extends FakeElement {
+  options: Array<{ value: string; textContent: string; label: string; selected: boolean }> = [];
+  events: string[] = [];
+  private nextValue: string;
+
+  constructor(value: string, options: Array<{ value: string; text: string }>) {
+    super('');
+    this.nextValue = value;
+    this.options = options.map((option) => ({
+      value: option.value,
+      textContent: option.text,
+      label: option.text,
+      selected: option.value === value,
+    }));
+  }
+
+  get value() {
+    return this.nextValue;
+  }
+
+  set value(value: string) {
+    this.nextValue = value;
+    for (const option of this.options) option.selected = option.value === value;
   }
 
   dispatchEvent(event: FakeEvent) {
