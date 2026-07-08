@@ -38,6 +38,7 @@ function renderAccounts() {
   for (const account of accounts) {
     const item = document.createElement('article');
     item.className = 'account';
+    item.title = 'Double-click to apply this phone number';
 
     const text = document.createElement('div');
     const title = document.createElement('strong');
@@ -54,7 +55,15 @@ function renderAccounts() {
     button.className = 'apply';
     button.type = 'button';
     button.textContent = 'Apply';
-    button.addEventListener('click', () => applyAccount(account, button));
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      applyAccount(account, button);
+    });
+    button.addEventListener('dblclick', (event) => event.stopPropagation());
+
+    item.addEventListener('dblclick', () => {
+      if (!button.disabled) applyAccount(account, button);
+    });
 
     item.append(text, button);
     accountsBox.append(item);

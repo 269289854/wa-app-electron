@@ -87,6 +87,13 @@ button:disabled {
   border: 1px solid #dbeafe;
   border-radius: 7px;
   background: white;
+  cursor: default;
+  user-select: none;
+}
+
+.account:hover {
+  border-color: #99f6e4;
+  background: #f0fdfa;
 }
 
 .account strong,
