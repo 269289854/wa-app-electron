@@ -17,9 +17,21 @@
 - 服务端新增或稳定化了 `registration/cleanup-failed-account`、`registration/persist-login-state` 等 action 能力，但当前网页端没有直接作为新增 UI 功能使用。
 - Electron 已覆盖当前网页端直接使用的 cleanup pending、Play Integrity、probe/register、resume OTP、account-transfer refresh/poll。
 
-## 待处理
+## 2026-07-15 版本同步
 
-- Electron 内置本地服务二进制仍需要用服务端 `c1ea8a1` 重新构建并替换：
+- 本轮对比基线：服务端 `c1ea8a13ef44bb63ce5009573b2573b8e3a3023a`。
+- 本轮同步目标：本地服务端 `main`，`657b7738cb40e48b52bfdff4bdb0fb020e545731`（2026-07-15，`Merge branch 'main' of https://github.com/pood1e/wa-app`）。
+- 本轮服务端 `origin/main`：`28c8c9de612827625a3a505580575c05aa48e4f5`。
+- 本轮客户端当前 HEAD：`a728f3fe48d1ccae9105253861b55495161b9c0a`。
+- 本轮没有新增 Electron API 或页面入口；服务端变更由内置服务二进制提供：注册协议升级到 `2.26.26.72`、设备画像池更新、注册请求参数形状对齐、消息明文提取和持久化修复。
+
+### 内置服务构建
+
+- 构建环境：本机 Go `1.26.5`，临时 `protoc 31.1`，protobuf 生成插件 `protoc-gen-go v1.36.11`、`protoc-gen-go-grpc v1.6.2`。
+- 服务端测试：`go test ./...` 通过。
+- 已替换以下文件：
   - `resources/wa-app-service/win-x64/wa-app-service.exe`
   - `resources/wa-app-service/win-ia32/wa-app-service.exe`
-- 当前本机没有可用的 `go` 或 `docker` 命令；需要使用远程构建机或安装本地构建环境后再更新二进制。
+- `win-x64` SHA-256：`814E8FF05048F972B6BCBFC9DC9316B6CD141865D66E2CE37859EA3A321BA39F`。
+- `win-ia32` SHA-256：`5E34D31FFB4BF257549CA9EFE7133C1E9D1BD8B8CBC3A8942F69E660668A30F4`。
+- 本轮远程临时构建容器和临时源码目录已清理，未修改线上 `wa-app` 部署。
